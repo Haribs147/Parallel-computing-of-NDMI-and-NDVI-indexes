@@ -116,73 +116,21 @@ static void on_rozpocznij_clicked(GtkWidget *widget, gpointer user_data) {
     float* pafSCLData = NULL; int nSCLWidth = 0, nSCLHeight = 0;
     gboolean all_bands_loaded_successfully = TRUE;
 
+     // Próba wczytania wszystkich pasm
     pafBand4Data = LoadBandData(path_b04, &nBand4Width, &nBand4Height);
-    if (!pafBand4Data) {
-        fprintf(stderr, "Błąd wczytywania pasma B04 z: %s\n", path_b04);
-        all_bands_loaded_successfully = FALSE;
-    } else {
-        printf("Wczytano B04 (%dx%d)\n", nBand4Width, nBand4Height);
-    }
+    pafBand8Data = LoadBandData(path_b08, &nBand8Width, &nBand8Height);
+    pafBand11Data = LoadBandData(path_b11, &nBand11Width, &nBand11Height);
+    pafSCLData = LoadBandData(path_scl, &nSCLWidth, &nSCLHeight);
 
-    if (all_bands_loaded_successfully) {
-        pafBand8Data = LoadBandData(path_b08, &nBand8Width, &nBand8Height);
-        if (!pafBand8Data) {
-            fprintf(stderr, "Błąd wczytywania pasma B08 z: %s\n", path_b08);
-            all_bands_loaded_successfully = FALSE;
-        } else {
-            printf("Wczytano B08 (%dx%d)\n", nBand8Width, nBand8Height);
-        }
-    }
-
-    if (all_bands_loaded_successfully) {
-        pafBand11Data = LoadBandData(path_b11, &nBand11Width, &nBand11Height);
-        if (!pafBand11Data) {
-            fprintf(stderr, "Błąd wczytywania pasma B11 z: %s\n", path_b11);
-            all_bands_loaded_successfully = FALSE;
-        } else {
-            printf("Wczytano B11 (%dx%d)\n", nBand11Width, nBand11Height);
-        }
-    }
-
-    if (all_bands_loaded_successfully) {
-        pafSCLData = LoadBandData(path_scl, &nSCLWidth, &nSCLHeight);
-        if (!pafSCLData) {
-            fprintf(stderr, "Błąd wczytywania pasma SCL z: %s\n", path_scl);
-            all_bands_loaded_successfully = FALSE;
-        } else {
-            printf("Wczytano SCL (%dx%d)\n", nSCLWidth, nSCLHeight);
-        }
-    }
-
-    if (all_bands_loaded_successfully) {
-        g_print("Wszystkie wymagane pasma wczytane pomyślnie.\n");
-        
-        // TODO: Tutaj logika resamplingiem i przekazanie danych do create_and_show_map_window
-        // Np. stworzyć strukturę AppData, wypełnić ją załadowanymi i przeskalowanymi danymi
-        // i przekazać wskaźnik do niej jako user_data.
-        // AppData app_data;
-        // app_data.b4_data = pafBand4Data; app_data.b4_width = nBand4Width; ... itd.
-        // app_data.target_resolution_10m = res_10m_selected;
-
-        GtkApplication *app = gtk_window_get_application(GTK_WINDOW(config_window_widget));
-        create_and_show_map_window(app, NULL /* &app_data */); // Przekaż dane tutaj
-        gtk_widget_destroy(config_window_widget);
-
-        // WAŻNE: Pamięć za pafBandXData powinna być zwolniona, gdy nie jest już potrzebna.
-        // Jeśli przekazujesz ją do okna mapy, to okno mapy (lub logika po nim) powinno ją zwolnić.
-        // Na potrzeby tego przykładu, jeśli nie przekazujemy dalej, można by je tu zwolnić.
-        // Ale ponieważ mają być użyte do mapy, ich zwolnienie tutaj byłoby błędem.
-        // Na razie zostawiamy bez zwalniania, zakładając, że okno mapy się nimi zajmie.
-        // Jeśli okno mapy nie powstanie, to zostaną zwolnione w bloku 'else' poniżej.
-
-    } else {
-        fprintf(stderr, "\nNie udało się wczytać wszystkich pasm. Przetwarzanie przerwane. Okno konfiguracji pozostaje otwarte.\n");
-        GtkWidget *load_error_dialog = gtk_message_dialog_new(config_window,
+    // Sprawdzenie, czy którekolwiek pasmo NIE zostało pomyślnie wczytane (odwrócona logika)
+    if (!pafBand4Data || !pafBand8Data || !pafBand11Data || !pafSCLData) {
+        fprintf(stderr, "\nNie udało się wczytać jednego lub więcej pasm. Przetwarzanie przerwane.\n");
+        GtkWidget *load_error_dialog = gtk_message_dialog_new(config_window_widget,
                                                               GTK_DIALOG_DESTROY_WITH_PARENT,
                                                               GTK_MESSAGE_ERROR,
                                                               GTK_BUTTONS_CLOSE,
-                                                              "Błąd wczytywania pasm!\n\nSprawdź komunikaty w konsoli i poprawność wybranych plików.");
-        gtk_window_set_title(GTK_WINDOW(load_error_dialog), "Błąd wczytywania");
+                                                              "Błąd wczytywania pasm!\n\nNie udało się wczytać jednego lub więcej wymaganych plików pasm.");
+        gtk_window_set_title(GTK_WINDOW(load_error_dialog), "Błąd wczytywania danych");
         gtk_dialog_run(GTK_DIALOG(load_error_dialog));
         gtk_widget_destroy(load_error_dialog);
 
@@ -191,8 +139,41 @@ static void on_rozpocznij_clicked(GtkWidget *widget, gpointer user_data) {
         if (pafBand8Data) free(pafBand8Data);
         if (pafBand11Data) free(pafBand11Data);
         if (pafSCLData) free(pafSCLData);
-        // Nie niszczymy okna konfiguracji, użytkownik może poprawić wybór
+        // Okno konfiguracji pozostaje otwarte
+        return;
     }
+    
+    // Jeśli doszliśmy tutaj, wszystkie pasma zostały wczytane pomyślnie
+    g_print("Wszystkie wymagane pasma wczytane pomyślnie.\n");
+    
+    // TODO: Tutaj logika resamplingiem i przekazanie danych do create_and_show_map_window
+    // Np. stworzyć strukturę AppData, wypełnić ją załadowanymi i przeskalowanymi danymi
+    // i przekazać wskaźnik do niej jako user_data.
+    // Pamiętaj o zarządzaniu pamięcią dla pafBandXData - jeśli są przekazywane,
+    // okno mapy lub kolejna funkcja powinna być odpowiedzialna za ich zwolnienie.
+    
+    // Przykład: Przekazanie danych (na razie tylko wskaźniki, bez struktury)
+    // Należałoby stworzyć strukturę, np.
+    // typedef struct {
+    //     float* b4_data; int b4_w, b4_h;
+    //     // ... reszta pasm ...
+    //     gboolean target_10m;
+    // } AppProcessingData;
+    // AppProcessingData* processing_data = g_new(AppProcessingData, 1);
+    // processing_data->b4_data = pafBand4Data; // itd.
+    // ... i przekazać processing_data do create_and_show_map_window
+    // oraz zaimplementować funkcję zwalniającą tę strukturę i jej zawartość.
+
+    GtkApplication *app = gtk_window_get_application(GTK_WINDOW(config_window_widget));
+    create_and_show_map_window(app, NULL /* Tutaj wskaźnik do struktury z danymi */);
+    gtk_widget_destroy(config_window_widget);
+
+    // WAŻNE: Jeśli dane nie są przekazywane do create_and_show_map_window
+    // (lub jeśli create_and_show_map_window kopiuje dane i nie przejmuje odpowiedzialności za zwolnienie),
+    // to pamięć po pafBandXData powinna być zwolniona tutaj.
+    // Na razie zakładamy, że okno mapy (lub dalsza logika) przejmie odpowiedzialność.
+    // To jest kluczowy element zarządzania pamięcią do dopracowania.
+    // Jeśli dane są przekazywane do okna mapy, to ono powinno je zwolnić przy swoim zniszczeniu.
 }
 
 static void on_config_radio_resolution_toggled(GtkToggleButton *togglebutton, gpointer data) {
