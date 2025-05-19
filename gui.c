@@ -183,43 +183,102 @@ static void on_rozpocznij_clicked(GtkWidget *widget, gpointer user_data) {
     }
 
     g_print("Wszystkie wymagane pasma wczytane pomyślnie.\n");
+    
+    // --- Przygotowanie wskaźników na finalne dane pasm po przetworzeniu ---
+    float* pafBand4ProcessedData = pafBand4Data;
+    int nBand4ProcessedWidth = nBand4Width;
+    int nBand4ProcessedHeight = nBand4Height;
 
-    float* pafSCLProcessedData = NULL;
+    float* pafBand8ProcessedData = pafBand8Data;
+    int nBand8ProcessedWidth = nBand8Width;
+    int nBand8ProcessedHeight = nBand8Height;
+
+    float* pafBand11ProcessedData = pafBand11Data;
+    int nBand11ProcessedWidth = nBand11Width;
+    int nBand11ProcessedHeight = nBand11Height;
+
+    float* pafSCLProcessedData = pafSCLData;
     int nSCLProcessedWidth = nSCLWidth;
     int nSCLProcessedHeight = nSCLHeight;
 
-    int targetSclResWidth = nSCLWidth;
-    int targetSclResHeight = nSCLHeight;
+    int target_10m_width = nBand4Width;
+    int target_10m_height = nBand4Height;
 
     if (res_10m_selected) {
-        if (pafBand4Data && nBand4Width > 0 && nBand4Height > 0) {
-            targetSclResWidth = nBand4Width;
-            targetSclResHeight = nBand4Height;
-        } else {
-            g_print("Ostrzeżenie: Wybrano rozdzielczość 10m, ale pasmo B04 nie jest dostępne. SCL nie zostanie przeskalowane.\n");
-            // TODO TERMINATE PROGRAM
-        }
-    }
+        // Sprawdzamy, czy B11 faktycznie wymaga upsamplingu do wymiarów 10m
+        if (nBand11Width != target_10m_width || nBand11Height != target_10m_height) {
+            g_print("Rozpoczynanie upscalingu B11 (SWIR1) do %dx%d (Interpolacja dwuliniowa)...\n", target_10m_width, target_10m_height);
+            float* resampled_b11_data = bilinear_resample_float(
+                pafBand11Data,          // Oryginalne dane B11 (20m)
+                nBand11Width,           // Szerokość oryginalna B11
+                nBand11Height,          // Wysokość oryginalna B11
+                target_10m_width,       // Docelowa szerokość (10m, z B04)
+                target_10m_height       // Docelowa wysokość (10m, z B04)
+            );
 
-    if (res_10m_selected) {
-        g_print("Rozpoczynanie resamplingiem SCL do %dx%d (Najbliższy Sąsiad)...\n", targetSclResWidth, targetSclResHeight);
-        pafSCLProcessedData = nearest_neighbor_resample_scl(
-            pafSCLData,
-            nSCLWidth, nSCLHeight,
-            targetSclResWidth, targetSclResHeight
-        );
-        if (!pafSCLProcessedData) {
-            fprintf(stderr, "Błąd podczas resamplingiem SCL. Użycie oryginalnych danych SCL.\n");
-            pafSCLProcessedData = pafSCLData;
+            if (!resampled_b11_data) {
+                fprintf(stderr, "Błąd podczas upscalingu B11. Użycie oryginalnych danych B11 (20m).\n");
+                // pafBand11ProcessedData nadal wskazuje na oryginalne pafBand11Data
+            } else {
+                g_print("Upscaling B11 (SWIR1) zakończony.\n");
+                // Jeśli pafBand11ProcessedData wskazywało na coś innego (np. z poprzedniego, nieudanego etapu), zwolnij to.
+                // W tym konkretnym przepływie, pafBand11ProcessedData == pafBand11Data przed tą operacją.
+                if (pafBand11ProcessedData != pafBand11Data) { // Dodatkowe zabezpieczenie
+                     free(pafBand11ProcessedData);
+                }
+                free(pafBand11Data); // Zwolnij oryginalne dane B11 (20m), bo mamy nowe
+                pafBand11ProcessedData = resampled_b11_data; // Użyj nowych, przeskalowanych danych
+                nBand11ProcessedWidth = target_10m_width;
+                nBand11ProcessedHeight = target_10m_height;
+            }
         } else {
-            g_print("Resampling SCL zakończony.\n");
-            free(pafSCLData);
-            nSCLProcessedWidth = targetSclResWidth;
-            nSCLProcessedHeight = targetSclResHeight;
+            g_print("Upscaling B11 nie jest wymagany (wymiary już pasują do 10m).\n");
+            // pafBand11ProcessedData nadal wskazuje na pafBand11Data
         }
     } else {
-        g_print("Resampling SCL nie jest wymagany.\n");
-        pafSCLProcessedData = pafSCLData;
+        // Jeśli wybrano "downscaling do 20m", pasmo B11 jest już 20m, więc nie robimy nic.
+        g_print("B11 (SWIR1) pozostaje w oryginalnej rozdzielczości 20m.\n");
+        // pafBand11ProcessedData nadal wskazuje na pafBand11Data
+    }
+
+
+    // --- ZMODYFIKOWANO: Resampling SCL (Nearest Neighbor) ---
+    int targetSclWidth = nSCLWidth;     // Domyślnie oryginalne wymiary SCL
+    int targetSclHeight = nSCLHeight;
+
+    if (res_10m_selected) { // Jeśli docelowa rozdzielczość to 10m, użyj wymiarów 10m
+        targetSclWidth = target_10m_width;
+        targetSclHeight = target_10m_height;
+    } 
+    // Jeśli wybrano "downscaling do 20m", SCL jest już 20m, więc targetSclWidth/Height pozostaną nSCLWidth/Height
+
+    // Sprawdzamy, czy SCL faktycznie wymaga resamplingu
+    if (nSCLWidth != targetSclWidth || nSCLHeight != targetSclHeight) {
+        g_print("Rozpoczynanie resamplingiem SCL do %dx%d (Najbliższy Sąsiad)...\n", targetSclWidth, targetSclHeight);
+        float* resampled_scl_data = nearest_neighbor_resample_scl(
+            pafSCLData,             // Oryginalne dane SCL
+            nSCLWidth,              // Szerokość oryginalna SCL
+            nSCLHeight,             // Wysokość oryginalna SCL
+            targetSclWidth,         // Docelowa szerokość
+            targetSclHeight         // Docelowa wysokość
+        );
+        if (!resampled_scl_data) {
+            fprintf(stderr, "Błąd podczas resamplingiem SCL. Użycie oryginalnych danych SCL.\n");
+            // pafSCLProcessedData nadal wskazuje na oryginalne pafSCLData
+        } else {
+            g_print("Resampling SCL zakończony.\n");
+            // Podobnie jak dla B11, jeśli pafSCLProcessedData wskazywało na coś innego.
+            if (pafSCLProcessedData != pafSCLData) {
+                free(pafSCLProcessedData);
+            }
+            free(pafSCLData); // Zwolnij oryginalne dane SCL, bo mamy nowe
+            pafSCLProcessedData = resampled_scl_data;
+            nSCLProcessedWidth = targetSclWidth;
+            nSCLProcessedHeight = targetSclHeight;
+        }
+    } else {
+        g_print("Resampling SCL nie jest wymagany (wymiary już pasują do docelowych).\n");
+        // pafSCLProcessedData nadal wskazuje na pafSCLData
     }
 
     GtkApplication *app = gtk_window_get_application(GTK_WINDOW(config_window_widget));
