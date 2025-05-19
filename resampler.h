@@ -21,4 +21,12 @@ float* bilinear_resample_float(
     int output_height
 );
 
+float* average_resample_float(
+    const float* input_band,
+    int input_width,
+    int input_height,
+    int output_width,
+    int output_height
+);
+
 #endif

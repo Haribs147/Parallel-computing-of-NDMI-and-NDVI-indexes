@@ -185,100 +185,91 @@ static void on_rozpocznij_clicked(GtkWidget *widget, gpointer user_data) {
     g_print("Wszystkie wymagane pasma wczytane pomyślnie.\n");
     
     // --- Przygotowanie wskaźników na finalne dane pasm po przetworzeniu ---
-    float* pafBand4ProcessedData = pafBand4Data;
-    int nBand4ProcessedWidth = nBand4Width;
-    int nBand4ProcessedHeight = nBand4Height;
+    float* pafBand4Processed = pafBand4Data;
+    int nBand4ProcessedW = nBand4Width, nBand4ProcessedH = nBand4Height;
+    float* pafBand8Processed = pafBand8Data;
+    int nBand8ProcessedW = nBand8Width, nBand8ProcessedH = nBand8Height;
+    float* pafBand11Processed = pafBand11Data;
+    int nBand11ProcessedW = nBand11Width, nBand11ProcessedH = nBand11Height;
+    float* pafSCLProcessed = pafSCLData;
+    int nSCLProcessedW = nSCLWidth, nSCLProcessedH = nSCLHeight;
 
-    float* pafBand8ProcessedData = pafBand8Data;
-    int nBand8ProcessedWidth = nBand8Width;
-    int nBand8ProcessedHeight = nBand8Height;
 
-    float* pafBand11ProcessedData = pafBand11Data;
-    int nBand11ProcessedWidth = nBand11Width;
-    int nBand11ProcessedHeight = nBand11Height;
-
-    float* pafSCLProcessedData = pafSCLData;
-    int nSCLProcessedWidth = nSCLWidth;
-    int nSCLProcessedHeight = nSCLHeight;
-
-    int target_10m_width = nBand4Width;
-    int target_10m_height = nBand4Height;
+    int final_processing_width;
+    int final_processing_height;
 
     if (res_10m_selected) {
-        // Sprawdzamy, czy B11 faktycznie wymaga upsamplingu do wymiarów 10m
-        if (nBand11Width != target_10m_width || nBand11Height != target_10m_height) {
-            g_print("Rozpoczynanie upscalingu B11 (SWIR1) do %dx%d (Interpolacja dwuliniowa)...\n", target_10m_width, target_10m_height);
-            float* resampled_b11_data = bilinear_resample_float(
-                pafBand11Data,          // Oryginalne dane B11 (20m)
-                nBand11Width,           // Szerokość oryginalna B11
-                nBand11Height,          // Wysokość oryginalna B11
-                target_10m_width,       // Docelowa szerokość (10m, z B04)
-                target_10m_height       // Docelowa wysokość (10m, z B04)
-            );
+        final_processing_width = nBand4Width; // Używamy wymiarów B04 jako referencji dla 10m
+        final_processing_height = nBand4Height;
+        g_print("Docelowa rozdzielczość: 10m (%dx%d)\n", final_processing_width, final_processing_height);
 
-            if (!resampled_b11_data) {
-                fprintf(stderr, "Błąd podczas upscalingu B11. Użycie oryginalnych danych B11 (20m).\n");
-                // pafBand11ProcessedData nadal wskazuje na oryginalne pafBand11Data
+        // Upsample B11 (20m -> 10m)
+        if (nBand11Width != final_processing_width || nBand11Height != final_processing_height) {
+            g_print("Upsampling B11 do %dx%d...\n", final_processing_width, final_processing_height);
+            float* resampled_b11 = bilinear_resample_float(pafBand11Data, nBand11Width, nBand11Height, final_processing_width, final_processing_height);
+            if (resampled_b11) {
+                if (pafBand11Processed != pafBand11Data) free(pafBand11Processed); // Jeśli był wcześniej jakiś "processed"
+                free(pafBand11Data); // Zwolnij oryginalne 20m
+                pafBand11Processed = resampled_b11;
+                nBand11ProcessedW = final_processing_width;
+                nBand11ProcessedH = final_processing_height;
+                g_print("Upsampling B11 zakończony.\n");
             } else {
-                g_print("Upscaling B11 (SWIR1) zakończony.\n");
-                // Jeśli pafBand11ProcessedData wskazywało na coś innego (np. z poprzedniego, nieudanego etapu), zwolnij to.
-                // W tym konkretnym przepływie, pafBand11ProcessedData == pafBand11Data przed tą operacją.
-                if (pafBand11ProcessedData != pafBand11Data) { // Dodatkowe zabezpieczenie
-                     free(pafBand11ProcessedData);
-                }
-                free(pafBand11Data); // Zwolnij oryginalne dane B11 (20m), bo mamy nowe
-                pafBand11ProcessedData = resampled_b11_data; // Użyj nowych, przeskalowanych danych
-                nBand11ProcessedWidth = target_10m_width;
-                nBand11ProcessedHeight = target_10m_height;
+                //fprintf(stderr, "Błąd upsamplingu B11. Przetwarzanie przerwane.\n"); goto cleanup_and_exit;
             }
-        } else {
-            g_print("Upscaling B11 nie jest wymagany (wymiary już pasują do 10m).\n");
-            // pafBand11ProcessedData nadal wskazuje na pafBand11Data
         }
-    } else {
-        // Jeśli wybrano "downscaling do 20m", pasmo B11 jest już 20m, więc nie robimy nic.
-        g_print("B11 (SWIR1) pozostaje w oryginalnej rozdzielczości 20m.\n");
-        // pafBand11ProcessedData nadal wskazuje na pafBand11Data
-    }
-
-
-    // --- ZMODYFIKOWANO: Resampling SCL (Nearest Neighbor) ---
-    int targetSclWidth = nSCLWidth;     // Domyślnie oryginalne wymiary SCL
-    int targetSclHeight = nSCLHeight;
-
-    if (res_10m_selected) { // Jeśli docelowa rozdzielczość to 10m, użyj wymiarów 10m
-        targetSclWidth = target_10m_width;
-        targetSclHeight = target_10m_height;
-    } 
-    // Jeśli wybrano "downscaling do 20m", SCL jest już 20m, więc targetSclWidth/Height pozostaną nSCLWidth/Height
-
-    // Sprawdzamy, czy SCL faktycznie wymaga resamplingu
-    if (nSCLWidth != targetSclWidth || nSCLHeight != targetSclHeight) {
-        g_print("Rozpoczynanie resamplingiem SCL do %dx%d (Najbliższy Sąsiad)...\n", targetSclWidth, targetSclHeight);
-        float* resampled_scl_data = nearest_neighbor_resample_scl(
-            pafSCLData,             // Oryginalne dane SCL
-            nSCLWidth,              // Szerokość oryginalna SCL
-            nSCLHeight,             // Wysokość oryginalna SCL
-            targetSclWidth,         // Docelowa szerokość
-            targetSclHeight         // Docelowa wysokość
-        );
-        if (!resampled_scl_data) {
-            fprintf(stderr, "Błąd podczas resamplingiem SCL. Użycie oryginalnych danych SCL.\n");
-            // pafSCLProcessedData nadal wskazuje na oryginalne pafSCLData
-        } else {
-            g_print("Resampling SCL zakończony.\n");
-            // Podobnie jak dla B11, jeśli pafSCLProcessedData wskazywało na coś innego.
-            if (pafSCLProcessedData != pafSCLData) {
-                free(pafSCLProcessedData);
+        // Upsample SCL (20m -> 10m)
+        if (nSCLWidth != final_processing_width || nSCLHeight != final_processing_height) {
+             g_print("Upsampling SCL do %dx%d...\n", final_processing_width, final_processing_height);
+            float* resampled_scl = nearest_neighbor_resample_scl(pafSCLData, nSCLWidth, nSCLHeight, final_processing_width, final_processing_height);
+            if (resampled_scl) {
+                if (pafSCLProcessed != pafSCLData) free(pafSCLProcessed);
+                free(pafSCLData); // Zwolnij oryginalne 20m
+                pafSCLProcessed = resampled_scl;
+                nSCLProcessedW = final_processing_width;
+                nSCLProcessedH = final_processing_height;
+                g_print("Upsampling SCL zakończony.\n");
+            } else {
+                //fprintf(stderr, "Błąd upsamplingu SCL. Przetwarzanie przerwane.\n"); goto cleanup_and_exit;
             }
-            free(pafSCLData); // Zwolnij oryginalne dane SCL, bo mamy nowe
-            pafSCLProcessedData = resampled_scl_data;
-            nSCLProcessedWidth = targetSclWidth;
-            nSCLProcessedHeight = targetSclHeight;
         }
-    } else {
-        g_print("Resampling SCL nie jest wymagany (wymiary już pasują do docelowych).\n");
-        // pafSCLProcessedData nadal wskazuje na pafSCLData
+        // B4 i B8 są już 10m
+    } else { // res_20m_selected (downscaling do 20m)
+        final_processing_width = nBand11Width; // Używamy wymiarów B11 jako referencji dla 20m
+        final_processing_height = nBand11Height;
+        g_print("Docelowa rozdzielczość: 20m (%dx%d)\n", final_processing_width, final_processing_height);
+
+        // Downscale B04 (10m -> 20m)
+        if (nBand4Width != final_processing_width || nBand4Height != final_processing_height) {
+            g_print("Downsampling B04 do %dx%d...\n", final_processing_width, final_processing_height);
+            float* resampled_b04 = average_resample_float(pafBand4Data, nBand4Width, nBand4Height, final_processing_width, final_processing_height);
+            if (resampled_b04) {
+                if (pafBand4Processed != pafBand4Data) free(pafBand4Processed);
+                free(pafBand4Data); // Zwolnij oryginalne 10m
+                pafBand4Processed = resampled_b04;
+                nBand4ProcessedW = final_processing_width;
+                nBand4ProcessedH = final_processing_height;
+                 g_print("Downsampling B04 zakończony.\n");
+            } else {
+                //fprintf(stderr, "Błąd downsamplingu B04. Przetwarzanie przerwane.\n"); goto cleanup_and_exit;
+            }
+        }
+        // Downscale B08 (10m -> 20m)
+         if (nBand8Width != final_processing_width || nBand8Height != final_processing_height) {
+            g_print("Downsampling B08 do %dx%d...\n", final_processing_width, final_processing_height);
+            float* resampled_b08 = average_resample_float(pafBand8Data, nBand8Width, nBand8Height, final_processing_width, final_processing_height);
+            if (resampled_b08) {
+                if (pafBand8Processed != pafBand8Data) free(pafBand8Processed);
+                free(pafBand8Data); // Zwolnij oryginalne 10m
+                pafBand8Processed = resampled_b08;
+                nBand8ProcessedW = final_processing_width;
+                nBand8ProcessedH = final_processing_height;
+                g_print("Downsampling B08 zakończony.\n");
+            } else {
+                //fprintf(stderr, "Błąd downsamplingu B08. Przetwarzanie przerwane.\n"); goto cleanup_and_exit;
+            }
+        }
+        // B11 i SCL są już 20m
     }
 
     GtkApplication *app = gtk_window_get_application(GTK_WINDOW(config_window_widget));
