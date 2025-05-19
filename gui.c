@@ -11,9 +11,17 @@
 #include "data_loader.h"
 #include "resampler.h"
 #include "utils.h"
+#include "index_calculator.h"
 
 #define DEFAULT_WINDOW_WIDTH 900
 #define DEFAULT_WINDOW_HEIGHT 750
+
+typedef struct {
+    float* ndvi_data;
+    float* ndmi_data;
+    int width;
+    int height;
+} IndexMapData;
 
 // Deklaracje wprzód dla funkcji GUI
 static void create_and_show_map_window(GtkApplication *app, gpointer user_data);
@@ -31,6 +39,23 @@ static GtkWidget *btn_load_b04_widget = NULL;
 static GtkWidget *btn_load_b08_widget = NULL;
 static GtkWidget *btn_load_b11_widget = NULL;
 static GtkWidget *btn_load_scl_widget = NULL;
+
+static void free_index_map_data(gpointer data) {
+    if (data == NULL) {
+        return;
+    }
+    IndexMapData *map_data = (IndexMapData*)data;
+    if (map_data->ndvi_data) {
+        free(map_data->ndvi_data);
+        map_data->ndvi_data = NULL;
+    }
+    if (map_data->ndmi_data) {
+        free(map_data->ndmi_data);
+        map_data->ndmi_data = NULL;
+    }
+    g_free(map_data); // g_free, ponieważ prawdopodobnie zaalokujemy strukturę za pomocą g_new lub g_malloc
+    g_print("Zwolniono pamięć danych mapy wskaźników.\n");
+}
 
 // Funkcja pomocnicza do obsługi wyboru pliku
 static void handle_file_selection(GtkWindow *parent_window, const gchar *dialog_title_suffix, char **target_path_variable, GtkButton *button_to_update) {
@@ -272,22 +297,112 @@ static void on_rozpocznij_clicked(GtkWidget *widget, gpointer user_data) {
         // B11 i SCL są już 20m
     }
 
+ g_print("\nObliczanie wskaźników NDVI i NDMI...\n");
+    float* ndvi_result = calculate_ndvi(pafBand8Processed, pafBand4Processed,
+                                        final_processing_width, final_processing_height,
+                                        pafSCLProcessed);
+    if (!ndvi_result) {
+        fprintf(stderr, "Błąd podczas obliczania NDVI.\n");
+        // Jeśli obliczanie NDVI się nie powiedzie, przejdź do cleanup_and_exit
+        // cleanup_and_exit powinien zwolnić wszystkie pafBandXProcessed
+        goto cleanup_and_exit;
+    }
+    printf("Obliczono NDVI (bufor: %p).\n", (void*)ndvi_result);
+
+    float* ndmi_result = calculate_ndmi(pafBand8Processed, pafBand11Processed,
+                                        final_processing_width, final_processing_height,
+                                        pafSCLProcessed);
+    if (!ndmi_result) {
+        fprintf(stderr, "Błąd podczas obliczania NDMI.\n");
+        free(ndvi_result); // Zwolnij NDVI, bo NDMI się nie udało
+        ndvi_result = NULL;
+        // Przejdź do cleanup_and_exit
+        goto cleanup_and_exit;
+    }
+    printf("Obliczono NDMI (bufor: %p).\n", (void*)ndmi_result);
+
+    g_print("Obliczanie wskaźników zakończone.\n");
+
+    // --- Zgodnie z prośbą: NIE PRZEKAZUJEMY WSKAŹNIKÓW DO OKNA MAPY ---
+    // --- ZWALNIAMY PAMIĘĆ PO OBLICZONYCH WSKAŹNIKACH OD RAZU ---
+    if (ndvi_result) {
+        free(ndvi_result);
+        ndvi_result = NULL;
+        g_print("Zwolniono pamięć po danych NDVI.\n");
+    }
+    if (ndmi_result) {
+        free(ndmi_result);
+        ndmi_result = NULL;
+        g_print("Zwolniono pamięć po danych NDMI.\n");
+    }
+
+    // --- ZWALNIAMY PAMIĘĆ PO PRZETWORZONYCH PASMACH ---
+    // Te bufory zostały użyte do obliczenia wskaźników i już ich nie potrzebujemy w tym przepływie.
+    // Oryginalne pafBandXData zostały zwolnione podczas procesu resamplingu, jeśli resampling miał miejsce,
+    // a pafBandXProcessed wskazuje na nową (lub oryginalną, jeśli nie było resamplingu) pamięć.
+    if (pafBand4Processed) { free(pafBand4Processed); pafBand4Processed = NULL; }
+    if (pafBand8Processed) { free(pafBand8Processed); pafBand8Processed = NULL; }
+    if (pafBand11Processed) { free(pafBand11Processed); pafBand11Processed = NULL; }
+    if (pafSCLProcessed) { free(pafSCLProcessed); pafSCLProcessed = NULL; }
+    g_print("Zwolniono pamięć po przetworzonych pasmach.\n");
+
+    // Zerowanie wskaźników na oryginalne dane, na wszelki wypadek, jeśli cleanup_and_exit miałoby je próbować zwolnić
+    // (chociaż idealnie, po udanym resamplingu, oryginalne wskaźniki powinny być już NULL lub wskazywać na to samo co Processed)
+    pafBand4Data = NULL;
+    pafBand8Data = NULL;
+    pafBand11Data = NULL;
+    pafSCLData = NULL;
+
+
+    // Otwórz okno mapy, ale bez przekazywania danych wskaźników
     GtkApplication *app = gtk_window_get_application(GTK_WINDOW(config_window_widget));
-    create_and_show_map_window(app, NULL );
-    gtk_widget_destroy(config_window_widget);
-    
-    // Pamiętaj o zwolnieniu pamięci dla danych pasm, gdy nie będą już potrzebne
-    // (np. w oknie mapy lub po jego zamknięciu)
-    // if (pafBand4Data) free(pafBand4Data); // Przykład
-    // if (pafBand8Data) free(pafBand8Data); // Przykład
-    // if (pafBand11Data) free(pafBand11Data); // Przykład
-    // if (pafSCLProcessedData && pafSCLProcessedData != pafSCLData) free(pafSCLProcessedData); // Przykład, jeśli SCL było resamplowane
-    // else if (pafSCLProcessedData == pafSCLData && pafSCLData != NULL) { /* pafSCLData zostanie zwolnione później lub nie było resamplowane */ }
+    create_and_show_map_window(app, NULL); // << Przekazujemy NULL jako user_data
+    gtk_widget_destroy(config_window_widget); // Zamknij okno konfiguracji
+    return; // Zakończ pomyślnie
 
+cleanup_and_exit:
+    g_print("Wystąpił błąd w on_rozpocznij_clicked, zwalnianie zasobów...\n");
+    // Zwolnij wszystkie bufory, które mogły zostać zaalokowane
+    // Sprawdź, czy wskaźnik nie jest NULL przed zwolnieniem
+    // Jeśli pafBandXProcessed wskazuje na te same dane co pafBandXData,
+    // a pafBandXData zostało już zwolnione (np. w udanym bloku resamplingu),
+    // to nie próbuj zwalniać pafBandXProcessed ponownie.
+    // Ta sekcja jest trudna do zrobienia idealnie bez dokładnego śledzenia, co zostało zwolnione.
+    // Bezpieczniej jest polegać na tym, że jeśli pafBandXProcessed != pafBandXData, to pafBandXData zostało zwolnione.
+    // A jeśli są równe, to zwalniamy jeden z nich.
 
-    g_print("Dane pasm (i SCL) przekazane (koncepcyjnie) do okna mapy. Zarządzanie pamięcią TODO.\n");
+    // W przypadku błędu, zwalniamy wszystko, co mogło zostać przetworzone lub wczytane.
+    // Jeśli `pafBandXProcessed` wskazuje na nową pamięć, zwalniamy ją.
+    // Oryginalne `pafBandXData` są zwalniane, jeśli nie zostały zastąpione przez `pafBandXProcessed`.
+
+    // Zwalniamy to, co mogło zostać stworzone przez resampling i przypisane do Processed,
+    // jeśli jest różne od oryginalnego Data (bo wtedy Data zostało już zwolnione).
+    if (pafBand4Processed && pafBand4Processed != pafBand4Data) free(pafBand4Processed);
+    if (pafBand8Processed && pafBand8Processed != pafBand8Data) free(pafBand8Processed);
+    if (pafBand11Processed && pafBand11Processed != pafBand11Data) free(pafBand11Processed);
+    if (pafSCLProcessed && pafSCLProcessed != pafSCLData) free(pafSCLProcessed);
+
+    // Zwalniamy oryginalne dane, jeśli jeszcze istnieją (nie zostały zwolnione i zastąpione)
+    if (pafBand4Data) free(pafBand4Data);
+    if (pafBand8Data) free(pafBand8Data);
+    if (pafBand11Data) free(pafBand11Data);
+    if (pafSCLData) free(pafSCLData);
+
+    // Jeśli ndvi_result zostało zaalokowane przed błędem z ndmi_result
+    if (ndvi_result) free(ndvi_result);
+    // ndmi_result nie trzeba tu zwalniać, bo jeśli !ndmi_result to albo nie było alokacji, albo błąd i zwolnienie ndvi
+    // a jeśli ndmi_result istnieje, to znaczy, że nie było goto i zostało zwolnione wyżej.
+
+    GtkWidget *processing_error_dialog = gtk_message_dialog_new(parent_gtk_window,
+                                                         GTK_DIALOG_DESTROY_WITH_PARENT,
+                                                         GTK_MESSAGE_ERROR,
+                                                         GTK_BUTTONS_CLOSE,
+                                                         "Błąd podczas przetwarzania danych. Sprawdź konsolę.");
+    gtk_window_set_title(GTK_WINDOW(processing_error_dialog), "Błąd przetwarzania");
+    gtk_dialog_run(GTK_DIALOG(processing_error_dialog));
+    gtk_widget_destroy(processing_error_dialog);
+    return; // Dodano return, aby wyjść z funkcji po błędzie
 }
-
 
 static void on_config_radio_resolution_toggled(GtkToggleButton *togglebutton, gpointer data) {
     if (gtk_toggle_button_get_active(togglebutton)) {
@@ -309,17 +424,28 @@ static void on_map_type_radio_toggled(GtkToggleButton *togglebutton, gpointer da
 }
 
 static void create_and_show_map_window(GtkApplication *app, gpointer user_data) {
+    if (user_data == NULL) {
+        fprintf(stderr, "Błąd krytyczny: Brak danych do wyświetlenia mapy!\n");
+        return;
+    }
+    IndexMapData *map_data = (IndexMapData*)user_data;
+
     GtkWidget *map_window;
     GtkWidget *map_main_vbox;
     GtkWidget *radio_map_hbox;
     GtkWidget *radio_ndmi, *radio_ndvi;
-    GtkWidget *frame_for_map;
+    GtkWidget *scrolled_window_for_map; // << ZMIANA: Zamiast frame bezpośrednio
     GtkWidget *drawing_area_map;
 
     map_window = gtk_application_window_new(app);
-    gtk_window_set_title(GTK_WINDOW(map_window), "Wynikowa Mapa");
-    gtk_window_set_default_size(GTK_WINDOW(map_window), DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
+    gtk_window_set_title(GTK_WINDOW(map_window), "Wynikowa Mapa Wskaźników");
+    // Użyj stałych rozmiarów dla okna głównego
+    gtk_window_set_default_size(GTK_WINDOW(map_window),
+                                DEFAULT_WINDOW_WIDTH,
+                                DEFAULT_WINDOW_HEIGHT);
     gtk_container_set_border_width(GTK_CONTAINER(map_window), 10);
+
+    g_signal_connect(map_window, "destroy", G_CALLBACK(free_index_map_data), map_data);
 
     map_main_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_container_add(GTK_CONTAINER(map_window), map_main_vbox);
@@ -328,21 +454,49 @@ static void create_and_show_map_window(GtkApplication *app, gpointer user_data) 
     gtk_widget_set_halign(radio_map_hbox, GTK_ALIGN_START);
     gtk_box_pack_start(GTK_BOX(map_main_vbox), radio_map_hbox, FALSE, FALSE, 0);
 
+    // Przechowujemy wskaźnik na map_data, aby był dostępny w on_map_type_radio_toggled
+    // Można go też przekazać jako user_data do sygnału "toggled"
+    // Dla uproszczenia, jeśli drawing_area będzie miało te dane, to wystarczy.
+
     radio_ndmi = gtk_radio_button_new_with_label(NULL, "NDMI");
-    g_signal_connect(radio_ndmi, "toggled", G_CALLBACK(on_map_type_radio_toggled), NULL);
+    // g_signal_connect(radio_ndmi, "toggled", G_CALLBACK(on_map_type_radio_toggled), drawing_area_map); // Przekaż drawing_area
     gtk_box_pack_start(GTK_BOX(radio_map_hbox), radio_ndmi, FALSE, FALSE, 0);
 
     radio_ndvi = gtk_radio_button_new_with_label_from_widget(GTK_RADIO_BUTTON(radio_ndmi), "NDVI");
-    g_signal_connect(radio_ndvi, "toggled", G_CALLBACK(on_map_type_radio_toggled), NULL);
+    // g_signal_connect(radio_ndvi, "toggled", G_CALLBACK(on_map_type_radio_toggled), drawing_area_map); // Przekaż drawing_area
     gtk_box_pack_start(GTK_BOX(radio_map_hbox), radio_ndvi, FALSE, FALSE, 0);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio_ndvi), TRUE);
 
-    frame_for_map = gtk_frame_new(NULL);
-    gtk_frame_set_shadow_type(GTK_FRAME(frame_for_map), GTK_SHADOW_ETCHED_IN);
-    gtk_box_pack_start(GTK_BOX(map_main_vbox), frame_for_map, TRUE, TRUE, 0);
+    // << DODANO: GtkScrolledWindow dla drawing_area >>
+    scrolled_window_for_map = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window_for_map),
+                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_hexpand(scrolled_window_for_map, TRUE);
+    gtk_widget_set_vexpand(scrolled_window_for_map, TRUE);
+    gtk_box_pack_start(GTK_BOX(map_main_vbox), scrolled_window_for_map, TRUE, TRUE, 0);
 
     drawing_area_map = gtk_drawing_area_new();
-    gtk_container_add(GTK_CONTAINER(frame_for_map), drawing_area_map);
+    // Ustaw żądany rozmiar dla drawing_area (mapa będzie tego rozmiaru)
+    gtk_widget_set_size_request(drawing_area_map, map_data->width, map_data->height);
+
+    // TODO: Podłącz sygnał "draw" dla drawing_area_map do funkcji rysującej mapę
+    // g_signal_connect(drawing_area_map, "draw", G_CALLBACK(on_draw_map_area), map_data); // map_data jako user_data dla rysowania
+
+    // Dodaj drawing_area do scrolled_window zamiast do ramki
+    gtk_container_add(GTK_CONTAINER(scrolled_window_for_map), drawing_area_map);
+
+    // Przechowanie wskaźnika na dane w samym drawing_area dla łatwiejszego dostępu w funkcji rysującej
+    // oraz w on_map_type_radio_toggled
+    g_object_set_data(G_OBJECT(drawing_area_map), "map_data_ptr", map_data);
+
+    // Zaktualizuj połączenia sygnałów dla radio buttonów, aby przekazywały drawing_area
+    // To pozwoli on_map_type_radio_toggled wywołać gtk_widget_queue_draw(drawing_area)
+    g_signal_connect(radio_ndmi, "toggled", G_CALLBACK(on_map_type_radio_toggled), drawing_area_map);
+    g_signal_connect(radio_ndvi, "toggled", G_CALLBACK(on_map_type_radio_toggled), drawing_area_map);
+
+
+    g_print("Wyświetlanie okna mapy z danymi: NDVI (%p), NDMI (%p), Wymiary: %dx%d\n",
+            (void*)map_data->ndvi_data, (void*)map_data->ndmi_data, map_data->width, map_data->height);
 
     gtk_widget_show_all(map_window);
 }
@@ -439,6 +593,8 @@ int run_gui(int argc, char *argv[]) {
     if (path_b08) g_free(path_b08);
     if (path_b11) g_free(path_b11);
     if (path_scl) g_free(path_scl);
+    
+    GDALDestroyDriverManager();
 
     return status;
 }

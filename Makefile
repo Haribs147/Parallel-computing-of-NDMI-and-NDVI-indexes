@@ -13,18 +13,14 @@ GDAL_CFLAGS = $(shell gdal-config --cflags)
 GDAL_LIBS = $(shell gdal-config --libs)
 
 # Wszystkie flagi kompilatora
-# -Wall włącza większość ostrzeżeń
-# -g dodaje informacje debugowania
-# -std=c11 dla standardu C11
 CFLAGS = $(GTK_CFLAGS) $(GDAL_CFLAGS) -Wall -g -std=c11
 
 # Wszystkie biblioteki do linkowania
-# -lm linkuje bibliotekę matematyczną (dla math.h)
 LIBS = $(GTK_LIBS) $(GDAL_LIBS) -lm
 
 # Pliki źródłowe
-# ZMODYFIKOWANO: Dodano utils.c
-SRCS = main.c gui.c data_loader.c resampler.c utils.c
+# ZMODYFIKOWANO: Dodano index_calculator.c
+SRCS = main.c gui.c data_loader.c resampler.c utils.c index_calculator.c
 
 # Pliki obiektowe (automatycznie generowane z .c na .o)
 OBJS = $(SRCS:.c=.o)
@@ -36,12 +32,12 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	@$(CC) $(OBJS) -o $(TARGET) $(LIBS)
 
-# Reguły kompilacji: tworzy pliki obiektowe (.o) z plików źródłowych (.c)
+# Reguły kompilacji
 main.o: main.c gui.h
 	@$(CC) $(CFLAGS) -c main.c -o main.o
 
-# ZMODYFIKOWANO: Dodano utils.h jako zależność dla gui.o
-gui.o: gui.c gui.h data_loader.h resampler.h utils.h
+# ZMODYFIKOWANO: Dodano index_calculator.h jako zależność dla gui.o
+gui.o: gui.c gui.h data_loader.h resampler.h utils.h index_calculator.h
 	@$(CC) $(CFLAGS) -c gui.c -o gui.o
 
 data_loader.o: data_loader.c data_loader.h
@@ -50,14 +46,15 @@ data_loader.o: data_loader.c data_loader.h
 resampler.o: resampler.c resampler.h
 	@$(CC) $(CFLAGS) -c resampler.c -o resampler.o
 
-# NOWA REGUŁA: dla utils.o
 utils.o: utils.c utils.h
 	@$(CC) $(CFLAGS) -c utils.c -o utils.o
 
+# NOWA REGUŁA: dla index_calculator.o
+index_calculator.o: index_calculator.c index_calculator.h
+	@$(CC) $(CFLAGS) -c index_calculator.c -o index_calculator.o
 
-# Reguła czyszczenia: usuwa plik wykonywalny i pliki obiektowe
+# Reguła czyszczenia
 clean:
 	@rm -f $(TARGET) $(OBJS)
 
-# Deklaracja, że 'all' i 'clean' nie są nazwami plików
 .PHONY: all clean
