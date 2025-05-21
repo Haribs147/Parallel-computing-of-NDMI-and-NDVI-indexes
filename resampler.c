@@ -4,38 +4,57 @@
 
 #include "resampler.h"
 
-float* nearest_neighbor_resample_scl(
-    const float* input_band,
-    int input_width,
-    int input_height,
-    int output_width,
-    int output_height
-) {
-    if (input_band == NULL || input_width <= 0 || input_height <= 0 || output_width <= 0 || output_height <= 0) {
-        fprintf(stderr, "Error: Invalid input parameters for nearest_neighbor_resample_scl.\n");
-        return NULL;
+int validate_input_params(const float* input_band, int input_width, int input_height,
+                                int output_width, int output_height) {
+    if (input_band == NULL || input_width <= 0 || input_height <= 0 ||
+        output_width <= 0 || output_height <= 0) {
+        fprintf(stderr, "Error: Invalid input parameters");
+        return 0;
     }
+    return 1;
+}
 
-    size_t num_output_pixels = (size_t)output_width * output_height;
+int validate_output_size(int output_width, int output_height, size_t* num_pixels) {
+    *num_pixels = (size_t)output_width * output_height;
 
-    if (num_output_pixels == 0){
-         fprintf(stderr, "Error: Output dimensions result in zero pixels but dimensions are non-zero (potential overflow or invalid args) for nearest_neighbor_resample_scl.\n");
-        return NULL;
+    if (*num_pixels == 0) {
+        fprintf(stderr, "Error: Output dimensions result in zero pixels but dimensions are non-zero (potential overflow or invalid args)");
+        return 0;
     }
 
     // Sprawdzenie, czy malloc nie dostanie zbyt dużej wartości
-    if (num_output_pixels > (SIZE_MAX / sizeof(float))) {
-        fprintf(stderr, "Error: Requested memory allocation size is too large for nearest_neighbor_resample_scl.\n");
-        return NULL;
+    if (*num_pixels > (SIZE_MAX / sizeof(float))) {
+        fprintf(stderr, "Error: Requested memory allocation size is too large");
+        return 0;
     }
 
+    return 1;
+}
 
-    float* output_band = malloc(num_output_pixels * sizeof(float));
+static float* allocate_output_band(size_t num_pixels) {
+    float* output_band = malloc(num_pixels * sizeof(float));
     if (output_band == NULL) {
-        fprintf(stderr, "Error: Memory allocation failed for output band in nearest_neighbor_resample_scl.\n");
+        fprintf(stderr, "Error: Memory allocation failed for output band");
         return NULL;
     }
+    return output_band;
+}
 
+// Funkcja do zaciskania wartości do zakresu
+static int clamp(int value, int min, int max) {
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+}
+
+// Funkcja obliczająca indeks piksela w obrazie jednowymiarowym
+static size_t pixel_index(int x, int y, int width) {
+    return (size_t)(y * width + x);
+}
+
+static void perform_nearest_neighbor_resample(const float* input_band, float* output_band,
+                                            int input_width, int input_height,
+                                            int output_width, int output_height) {
     float x_ratio = (float)input_width / output_width;
     float y_ratio = (float)input_height / output_height;
 
@@ -46,22 +65,43 @@ float* nearest_neighbor_resample_scl(
             int y_in = (int)(y_out * y_ratio + 0.5f);
 
             // Zaciskanie współrzędnych do granic obrazu wejściowego
-            if (x_in >= input_width) {
-                x_in = input_width - 1;
-            }
-            if (x_in < 0) {
-                x_in = 0;
-            }
-            if (y_in >= input_height) {
-                y_in = input_height - 1;
-            }
-            if (y_in < 0) {
-                y_in = 0;
-            }
+            x_in = clamp(x_in, 0, input_width - 1);
+            y_in = clamp(y_in, 0, input_height - 1);
 
-            output_band[y_out * output_width + x_out] = input_band[y_in * input_width + x_in];
+            output_band[pixel_index(x_out, y_out, output_width)] =
+                input_band[pixel_index(x_in, y_in, input_width)];
         }
     }
+}
+
+float* nearest_neighbor_resample_scl(
+    const float* input_band,
+    int input_width,
+    int input_height,
+    int output_width,
+    int output_height
+) {
+    if (!validate_input_params(input_band, input_width, input_height, output_width, output_height)) {
+        fprintf(stderr, "in nearest_neighbor_resample_scl.\n");
+        return NULL;
+    }
+
+    size_t num_output_pixels;
+    if (!validate_output_size(output_width, output_height, &num_output_pixels)) {
+        fprintf(stderr, "in nearest_neighbor_resample_scl.\n");
+        return NULL;
+    }
+
+    float* output_band = allocate_output_band(num_output_pixels);
+    if (output_band == NULL) {
+        fprintf(stderr, "in nearest_neighbor_resample_scl.\n");
+        return NULL;
+    }
+
+    perform_nearest_neighbor_resample(input_band, output_band,
+                                     input_width, input_height,
+                                     output_width, output_height);
+
     return output_band;
 }
 
