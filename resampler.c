@@ -31,7 +31,7 @@ int validate_output_size(int output_width, int output_height, size_t* num_pixels
     return 1;
 }
 
-static float* allocate_output_band(size_t num_pixels) {
+float* allocate_output_band(size_t num_pixels) {
     float* output_band = malloc(num_pixels * sizeof(float));
     if (output_band == NULL) {
         fprintf(stderr, "Error: Memory allocation failed for output band");
@@ -41,18 +41,46 @@ static float* allocate_output_band(size_t num_pixels) {
 }
 
 // Funkcja do zaciskania wartości do zakresu
-static int clamp(int value, int min, int max) {
+int clamp(int value, int min, int max) {
     if (value < min) return min;
     if (value > max) return max;
     return value;
 }
 
 // Funkcja obliczająca indeks piksela w obrazie jednowymiarowym
-static size_t pixel_index(int x, int y, int width) {
+size_t pixel_index(int x, int y, int width) {
     return (size_t)(y * width + x);
 }
 
-static void perform_nearest_neighbor_resample(const float* input_band, float* output_band,
+float* prepare_data(
+    const float* input_band,
+    int input_width,
+    int input_height,
+    int output_width,
+    int output_height,
+    const char* error_suffix
+) {
+    if (!validate_input_params(input_band, input_width, input_height, output_width, output_height)) {
+        fprintf(stderr, error_suffix);
+        return NULL;
+    }
+
+    size_t num_output_pixels;
+    if (!validate_output_size(output_width, output_height, &num_output_pixels)) {
+        fprintf(stderr, error_suffix);
+        return NULL;
+    }
+
+    float* output_band = allocate_output_band(num_output_pixels);
+    if (output_band == NULL) {
+        fprintf(stderr, error_suffix);
+        return NULL;
+    }
+
+    return output_band;
+}
+
+void perform_nearest_neighbor_resample(const float* input_band, float* output_band,
                                             int input_width, int input_height,
                                             int output_width, int output_height) {
     float x_ratio = (float)input_width / output_width;
@@ -83,20 +111,10 @@ float* nearest_neighbor_resample_scl(
 ) {
     char* error_suffix = "in nearest_neighbor_resample_scl.\n";
 
-    if (!validate_input_params(input_band, input_width, input_height, output_width, output_height)) {
-        fprintf(stderr, error_suffix);
-        return NULL;
-    }
+    float* output_band = prepare_data(
+        input_band, input_width, input_height, output_width, output_height, error_suffix);
 
-    size_t num_output_pixels;
-    if (!validate_output_size(output_width, output_height, &num_output_pixels)) {
-        fprintf(stderr, error_suffix);
-        return NULL;
-    }
-
-    float* output_band = allocate_output_band(num_output_pixels);
     if (output_band == NULL) {
-        fprintf(stderr, error_suffix);
         return NULL;
     }
 
@@ -163,20 +181,10 @@ float* bilinear_resample_float(
 ) {
     char* error_suffix = "in bilinear_resample_float.\n";
 
-    if (!validate_input_params(input_band, input_width, input_height, output_width, output_height)) {
-        fprintf(stderr, error_suffix);
-        return NULL;
-    }
+    float* output_band = prepare_data(
+        input_band, input_width, input_height, output_width, output_height, error_suffix);
 
-    size_t num_output_pixels;
-    if (!validate_output_size(output_width, output_height, &num_output_pixels)) {
-        fprintf(stderr, error_suffix);
-        return NULL;
-    }
-
-    float* output_band = allocate_output_band(num_output_pixels);
     if (output_band == NULL) {
-        fprintf(stderr, error_suffix);
         return NULL;
     }
 
@@ -187,7 +195,7 @@ float* bilinear_resample_float(
     return output_band;
 }
 
-static void perform_average_resample(const float* input_band, float* output_band,
+void perform_average_resample(const float* input_band, float* output_band,
                                     int input_width, int input_height,
                                     int output_width, int output_height) {
     // Współczynniki skalowania (ile pikseli wejściowych przypada na jeden piksel wyjściowy)
@@ -248,31 +256,23 @@ float* average_resample_float(
     int output_width,
     int output_height
 ) {
-    char* error_suffix = "in average_resample_float\n";
-    if (!validate_input_params(input_band, input_width, input_height, output_width, output_height)) {
-        fprintf(stderr, error_suffix);
+    char* error_suffix = "in average_resample_float.\n";
+
+    float* output_band = prepare_data(
+        input_band, input_width, input_height, output_width, output_height, error_suffix);
+
+    if (output_band == NULL) {
         return NULL;
     }
 
+    // Warning pomiędzy prepare_data a perform_average_resample
     if (output_width > input_width || output_height > input_height) {
         fprintf(stderr, "Warning: average_resample_float called for upsampling. Results may be incorrect.\n");
     }
 
-    size_t num_output_pixels;
-    if (!validate_output_size(output_width, output_height, &num_output_pixels)) {
-        fprintf(stderr, error_suffix);
-        return NULL;
-    }
-
-    float* output_band = allocate_output_band(num_output_pixels);
-    if (output_band == NULL) {
-        fprintf(stderr, error_suffix);
-        return NULL;
-    }
-
     perform_average_resample(input_band, output_band,
-                       input_width, input_height,
-                       output_width, output_height);
+                           input_width, input_height,
+                           output_width, output_height);
 
     return output_band;
 }
