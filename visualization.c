@@ -5,18 +5,6 @@
 
 #include "utils.h"
 
-static float clamp_value(float value, float min_val, float max_val) {
-    if (value < min_val) {
-        fprintf(stderr, "Warning: Clamping value %f to %.1f\n", value, min_val);
-        return min_val;
-    }
-    if (value > max_val) {
-        fprintf(stderr, "Warning: Clamping value %f to %.1f\n", value, max_val);
-        return max_val;
-    }
-    return value;
-}
-
 // Linear interpolation
 static float lerp(float a, float b, float t) {
     return a + t * (b - a);
@@ -48,17 +36,15 @@ void map_index_value_to_rgb(float value, unsigned char *r,
         return;
     }
 
-    float clamped_value = clamp_value(value, -1.0f, 1.0f);
-
-    if (clamped_value < 0.0f) {
+    if (value < 0.0f) {
         // t rośnie od 0 (dla value = -1.0) do 1 (dla value = 0.0)
-        float t = (clamped_value - (-1.0f)) / (0.0f - (-1.0f));
+        float t = (value - (-1.0f)) / (0.0f - (-1.0f));
         *r = 255;
         *g = (unsigned char)lerp(0.0f, 255.0f, t);
         *b = 0;
     } else {
         // t rośnie od 0 (dla value = 0.0) do 1 (dla value = 1.0)
-        float t = (clamped_value - 0.0f) / (1.0f - 0.0f);
+        float t = (value - 0.0f) / (1.0f - 0.0f);
         *r = (unsigned char)lerp(255.0f, 0.0f, t);// essa
         *g = 255;
         *b = 0;
