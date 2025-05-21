@@ -12,15 +12,20 @@ GTK_LIBS = $(shell pkg-config --libs gtk+-3.0)
 GDAL_CFLAGS = $(shell gdal-config --cflags)
 GDAL_LIBS = $(shell gdal-config --libs)
 
+# Usunięto OMP_FLAGS
+# Flagi OpenMP (opcjonalnie, jeśli chcesz użyć #pragma omp)
+# OMP_FLAGS = -fopenmp
+
 # Wszystkie flagi kompilatora
+# Usunięto OMP_FLAGS z CFLAGS
 CFLAGS = $(GTK_CFLAGS) $(GDAL_CFLAGS) -Wall -g -std=c11
 
 # Wszystkie biblioteki do linkowania
+# Usunięto OMP_FLAGS z LIBS
 LIBS = $(GTK_LIBS) $(GDAL_LIBS) -lm
 
 # Pliki źródłowe
-# ZMODYFIKOWANO: Dodano index_calculator.c
-SRCS = main.c gui.c data_loader.c resampler.c utils.c index_calculator.c
+SRCS = main.c gui.c data_loader.c resampler.c utils.c index_calculator.c visualization.c
 
 # Pliki obiektowe (automatycznie generowane z .c na .o)
 OBJS = $(SRCS:.c=.o)
@@ -36,8 +41,7 @@ $(TARGET): $(OBJS)
 main.o: main.c gui.h
 	@$(CC) $(CFLAGS) -c main.c -o main.o
 
-# ZMODYFIKOWANO: Dodano index_calculator.h jako zależność dla gui.o
-gui.o: gui.c gui.h data_loader.h resampler.h utils.h index_calculator.h
+gui.o: gui.c gui.h data_loader.h resampler.h utils.h index_calculator.h visualization.h
 	@$(CC) $(CFLAGS) -c gui.c -o gui.o
 
 data_loader.o: data_loader.c data_loader.h
@@ -49,9 +53,11 @@ resampler.o: resampler.c resampler.h
 utils.o: utils.c utils.h
 	@$(CC) $(CFLAGS) -c utils.c -o utils.o
 
-# NOWA REGUŁA: dla index_calculator.o
 index_calculator.o: index_calculator.c index_calculator.h
 	@$(CC) $(CFLAGS) -c index_calculator.c -o index_calculator.o
+
+visualization.o: visualization.c visualization.h index_calculator.h
+	@$(CC) $(CFLAGS) -c visualization.c -o visualization.o
 
 # Reguła czyszczenia
 clean:
