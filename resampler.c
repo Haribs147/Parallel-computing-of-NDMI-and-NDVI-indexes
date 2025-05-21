@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <math.h> // Dla roundf, jeśli byłby używany, lub innych funkcji matematycznych
+#include <math.h>
 
 #include "resampler.h"
 
@@ -16,30 +16,25 @@ float* nearest_neighbor_resample_scl(
         return NULL;
     }
 
-    // Użyj size_t dla wyniku mnożenia, aby uniknąć przepełnienia przy dużych obrazach
     size_t num_output_pixels = (size_t)output_width * output_height;
-    if (num_output_pixels == 0 && (output_width > 0 || output_height > 0) ) { // zabezpieczenie przed przepełnieniem iloczynu jeśli jeden wymiar jest duży a drugi 0
+
+    if (num_output_pixels == 0){
          fprintf(stderr, "Error: Output dimensions result in zero pixels but dimensions are non-zero (potential overflow or invalid args) for nearest_neighbor_resample_scl.\n");
         return NULL;
     }
-    if (num_output_pixels > (SIZE_MAX / sizeof(float))) { // Sprawdzenie czy malloc nie dostanie zbyt dużej wartości
+
+    // Sprawdzenie, czy malloc nie dostanie zbyt dużej wartości
+    if (num_output_pixels > (SIZE_MAX / sizeof(float))) {
         fprintf(stderr, "Error: Requested memory allocation size is too large for nearest_neighbor_resample_scl.\n");
         return NULL;
     }
 
 
-    float* output_band = (float*)malloc(num_output_pixels * sizeof(float));
-    if (output_band == NULL && num_output_pixels > 0) { // Sprawdź num_output_pixels > 0 bo malloc(0) może zwrócić NULL lub unikalny wskaźnik
+    float* output_band = malloc(num_output_pixels * sizeof(float));
+    if (output_band == NULL) {
         fprintf(stderr, "Error: Memory allocation failed for output band in nearest_neighbor_resample_scl.\n");
         return NULL;
-    } else if (num_output_pixels == 0) {
-        // Jeśli wymiary wyjściowe są 0xN lub Nx0, zwracamy pusty (ale poprawny) bufor lub NULL.
-        // GTK i inne biblioteki mogą oczekiwać poprawnego wskaźnika nawet dla danych o zerowym rozmiarze.
-        // malloc(0) jest zdefiniowany przez implementację, więc bezpieczniej jest zwrócić NULL lub specjalnie obsłużyć.
-        // Tutaj, jeśli output_width lub output_height było 0, num_output_pixels będzie 0.
-        // Zwrócenie output_band (który może być NULL z malloc(0) lub małym wskaźnikiem) jest OK.
     }
-
 
     float x_ratio = (float)input_width / output_width;
     float y_ratio = (float)input_height / output_height;
@@ -54,39 +49,16 @@ float* nearest_neighbor_resample_scl(
             if (x_in >= input_width) {
                 x_in = input_width - 1;
             }
-            if (x_in < 0) { // Powinno być >=0 jeśli x_out, x_ratio są dodatnie
+            if (x_in < 0) {
                 x_in = 0;
             }
             if (y_in >= input_height) {
                 y_in = input_height - 1;
             }
-            if (y_in < 0) { // Powinno być >=0
+            if (y_in < 0) {
                 y_in = 0;
             }
-            
-            // Upewnij się, że x_in i y_in są zawsze w zakresie po zacisnięciu,
-            // zwłaszcza jeśli input_width/height jest 1.
-            if (input_width > 0) { // Unikaj modulo przez zero
-                 x_in = (x_in < 0) ? 0 : (x_in >= input_width ? input_width -1 : x_in);
-            } else { // input_width == 0 (lub <=0 co jest błędem obsłużonym na początku)
-                // Jeśli input_width jest 0, nie ma skąd brać danych.
-                // To powinno być obsłużone przez walidację na początku funkcji.
-                // Jeśli jakimś cudem tu dotrzemy, przypisz wartość domyślną lub obsłuż błąd.
-                // output_band[y_out * output_width + x_out] = 0.0f; // Przykładowo
-                // continue;
-            }
 
-            if (input_height > 0) {
-                y_in = (y_in < 0) ? 0 : (y_in >= input_height ? input_height -1 : y_in);
-            } else {
-                // output_band[y_out * output_width + x_out] = 0.0f;
-                // continue;
-            }
-
-
-            // Jeśli input_width lub input_height jest 0, to pętle nie powinny się wykonać
-            // lub błąd powinien być zwrócony na początku.
-            // Zakładając, że input_width i input_height > 0 (sprawdzone na początku)
             output_band[y_out * output_width + x_out] = input_band[y_in * input_width + x_in];
         }
     }
@@ -193,7 +165,7 @@ float* average_resample_float(
         fprintf(stderr, "Warning: average_resample_float called with output dimensions larger than input. This is for downsampling.\n");
         // Można by zwrócić NULL lub próbować kontynuować, ale to nietypowe użycie.
     }
-    
+
     size_t num_output_pixels = (size_t)output_width * output_height;
      if (num_output_pixels == 0 && (output_width > 0 || output_height > 0) ) {
         fprintf(stderr, "Error: Output dimensions result in zero pixels but dimensions are non-zero (potential overflow or invalid args) for average_resample_float.\n");
@@ -237,7 +209,7 @@ float* average_resample_float(
             if (x_end_in > input_width) x_end_in = input_width;
             if (y_end_in <= y_start_in) y_end_in = y_start_in + 1;
             if (y_end_in > input_height) y_end_in = input_height;
-            
+
             float sum = 0.0f;
             int count = 0;
 
