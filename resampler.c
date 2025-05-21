@@ -81,20 +81,22 @@ float* nearest_neighbor_resample_scl(
     int output_width,
     int output_height
 ) {
+    char* error_suffix = "in nearest_neighbor_resample_scl.\n";
+
     if (!validate_input_params(input_band, input_width, input_height, output_width, output_height)) {
-        fprintf(stderr, "in nearest_neighbor_resample_scl.\n");
+        fprintf(stderr, error_suffix);
         return NULL;
     }
 
     size_t num_output_pixels;
     if (!validate_output_size(output_width, output_height, &num_output_pixels)) {
-        fprintf(stderr, "in nearest_neighbor_resample_scl.\n");
+        fprintf(stderr, error_suffix);
         return NULL;
     }
 
     float* output_band = allocate_output_band(num_output_pixels);
     if (output_band == NULL) {
-        fprintf(stderr, "in nearest_neighbor_resample_scl.\n");
+        fprintf(stderr, error_suffix);
         return NULL;
     }
 
@@ -105,50 +107,22 @@ float* nearest_neighbor_resample_scl(
     return output_band;
 }
 
-float* bilinear_resample_float(
-    const float* input_band,
-    int input_width,
-    int input_height,
-    int output_width,
-    int output_height
-) {
-    if (input_band == NULL || input_width <= 0 || input_height <= 0 || output_width <= 0 || output_height <= 0) {
-        fprintf(stderr, "Error: Invalid input parameters for bilinear_resample_float.\n");
-        return NULL;
-    }
-
-    size_t num_output_pixels = (size_t)output_width * output_height;
-    if (num_output_pixels == 0 && (output_width > 0 || output_height > 0) ) {
-        fprintf(stderr, "Error: Output dimensions result in zero pixels but dimensions are non-zero (potential overflow or invalid args) for bilinear_resample_float.\n");
-        return NULL;
-    }
-    if (num_output_pixels > (SIZE_MAX / sizeof(float))) { // Sprawdzenie czy malloc nie dostanie zbyt dużej wartości
-        fprintf(stderr, "Error: Requested memory allocation size is too large for bilinear_resample_float.\n");
-        return NULL;
-    }
-
-    float* output_band = (float*)malloc(num_output_pixels * sizeof(float));
-    if (output_band == NULL && num_output_pixels > 0) {
-        fprintf(stderr, "Error: Memory allocation failed for output band in bilinear_resample_float.\n");
-        return NULL;
-    } else if (num_output_pixels == 0) {
-        // Zwrócenie output_band (który może być NULL z malloc(0) lub małym wskaźnikiem) jest OK.
-        // Funkcja powinna zwrócić poprawny, choć potencjalnie pusty, bufor.
-    }
-
+void perform_bilinear_resample(const float* input_band, float* output_band,
+                                     int input_width, int input_height,
+                                     int output_width, int output_height) {
 
     float x_ratio = (float)input_width / output_width;
     float y_ratio = (float)input_height / output_height;
 
     for (int y_out = 0; y_out < output_height; y_out++) {
         for (int x_out = 0; x_out < output_width; x_out++) {
-            float x_in_proj = (x_out + 0.5f) * x_ratio - 0.5f; // mapowanie środka piksela wyjściowego na siatkę wejściową
+            // Mapowanie środka piksela wyjściowego na siatkę wejściową
+            float x_in_proj = (x_out + 0.5f) * x_ratio - 0.5f;
             float y_in_proj = (y_out + 0.5f) * y_ratio - 0.5f;
 
+            // Piksele graniczne
             int x1 = (int)floorf(x_in_proj);
             int y1 = (int)floorf(y_in_proj);
-
-            // Współrzędne x2, y2
             int x2 = x1 + 1;
             int y2 = y1 + 1;
 
@@ -156,23 +130,17 @@ float* bilinear_resample_float(
             float dx = x_in_proj - (float)x1;
             float dy = y_in_proj - (float)y1;
 
-            // Zabezpieczenie granic dla x1, y1, x2, y2
-            if (x1 < 0) x1 = 0;
-            if (x1 >= input_width) x1 = input_width - 1;
-            if (y1 < 0) y1 = 0;
-            if (y1 >= input_height) y1 = input_height - 1;
-
-            if (x2 < 0) x2 = 0; // Powinno być rzadkie, jeśli x1 jest >=0
-            if (x2 >= input_width) x2 = input_width - 1;
-            if (y2 < 0) y2 = 0; // Powinno być rzadkie, jeśli y1 jest >=0
-            if (y2 >= input_height) y2 = input_height - 1;
-
+            // Zaciskanie współrzędnych do granic obrazu wejściowego
+            x1 = clamp(x1, 0, input_width - 1);
+            y1 = clamp(y1, 0, input_height - 1);
+            x2 = clamp(x2, 0, input_width - 1);
+            y2 = clamp(y2, 0, input_height - 1);
 
             // Wartości pikseli otaczających
-            float p11 = input_band[y1 * input_width + x1];
-            float p21 = input_band[y1 * input_width + x2]; // x2, y1
-            float p12 = input_band[y2 * input_width + x1]; // x1, y2
-            float p22 = input_band[y2 * input_width + x2];
+            float p11 = input_band[pixel_index(x1, y1, input_width)];
+            float p21 = input_band[pixel_index(x2, y1, input_width)];
+            float p12 = input_band[pixel_index(x1, y2, input_width)];
+            float p22 = input_band[pixel_index(x2, y2, input_width)];
 
             // Interpolacja dwuliniowa
             float interpolated_value =
@@ -181,9 +149,41 @@ float* bilinear_resample_float(
                 p12 * (1.0f - dx) * dy +
                 p22 * dx * dy;
 
-            output_band[y_out * output_width + x_out] = interpolated_value;
+            output_band[pixel_index(x_out, y_out, output_width)] = interpolated_value;
         }
     }
+}
+
+float* bilinear_resample_float(
+    const float* input_band,
+    int input_width,
+    int input_height,
+    int output_width,
+    int output_height
+) {
+    char* error_suffix = "in bilinear_resample_float.\n";
+
+    if (!validate_input_params(input_band, input_width, input_height, output_width, output_height)) {
+        fprintf(stderr, error_suffix);
+        return NULL;
+    }
+
+    size_t num_output_pixels;
+    if (!validate_output_size(output_width, output_height, &num_output_pixels)) {
+        fprintf(stderr, error_suffix);
+        return NULL;
+    }
+
+    float* output_band = allocate_output_band(num_output_pixels);
+    if (output_band == NULL) {
+        fprintf(stderr, error_suffix);
+        return NULL;
+    }
+
+    perform_bilinear_resample(input_band, output_band,
+                             input_width, input_height,
+                             output_width, output_height);
+
     return output_band;
 }
 
