@@ -187,51 +187,15 @@ float* bilinear_resample_float(
     return output_band;
 }
 
-float* average_resample_float(
-    const float* input_band,
-    int input_width,
-    int input_height,
-    int output_width,
-    int output_height
-) {
-    if (input_band == NULL || input_width <= 0 || input_height <= 0 || output_width <= 0 || output_height <= 0) {
-        fprintf(stderr, "Error: Invalid input parameters for average_resample_float.\n");
-        return NULL;
-    }
-    // Ta funkcja jest przeznaczona do downsamplingu, np. o współczynnik 2
-    // Sprawdźmy, czy wymiary wyjściowe są mniej więcej połową wejściowych
-    // To uproszczone sprawdzenie, bardziej rygorystyczne mogłoby weryfikować dokładny współczynnik.
-    if (output_width > input_width || output_height > input_height) {
-        fprintf(stderr, "Warning: average_resample_float called with output dimensions larger than input. This is for downsampling.\n");
-        // Można by zwrócić NULL lub próbować kontynuować, ale to nietypowe użycie.
-    }
-
-    size_t num_output_pixels = (size_t)output_width * output_height;
-     if (num_output_pixels == 0 && (output_width > 0 || output_height > 0) ) {
-        fprintf(stderr, "Error: Output dimensions result in zero pixels but dimensions are non-zero (potential overflow or invalid args) for average_resample_float.\n");
-        return NULL;
-    }
-    if (num_output_pixels > (SIZE_MAX / sizeof(float))) {
-        fprintf(stderr, "Error: Requested memory allocation size is too large for average_resample_float.\n");
-        return NULL;
-    }
-
-    float* output_band = (float*)malloc(num_output_pixels * sizeof(float));
-    if (output_band == NULL && num_output_pixels > 0) {
-        fprintf(stderr, "Error: Memory allocation failed for output band in average_resample_float.\n");
-        return NULL;
-    } else if (num_output_pixels == 0) {
-        return output_band; // Może być NULL lub mały wskaźnik, ale jest poprawny dla 0 pikseli
-    }
-
+static void perform_average_resample(const float* input_band, float* output_band,
+                                    int input_width, int input_height,
+                                    int output_width, int output_height) {
     // Współczynniki skalowania (ile pikseli wejściowych przypada na jeden piksel wyjściowy)
-    // Dla downsamplingu 10m -> 20m, ratio będzie około 2.0
     float x_scale_factor = (float)input_width / output_width;
     float y_scale_factor = (float)input_height / output_height;
 
     for (int y_out = 0; y_out < output_height; y_out++) {
         for (int x_out = 0; x_out < output_width; x_out++) {
-            // Określ zakres pikseli wejściowych dla danego piksela wyjściowego
             // Początek bloku (lewy górny róg)
             int x_start_in = (int)roundf(x_out * x_scale_factor);
             int y_start_in = (int)roundf(y_out * y_scale_factor);
@@ -240,41 +204,75 @@ float* average_resample_float(
             int y_end_in = (int)roundf((y_out + 1) * y_scale_factor);
 
             // Zaciskanie do granic obrazu wejściowego
-            if (x_start_in < 0) x_start_in = 0;
-            if (x_start_in >= input_width) x_start_in = input_width -1; // Powinno dać 0 pikseli do sumowania
-            if (y_start_in < 0) y_start_in = 0;
-            if (y_start_in >= input_height) y_start_in = input_height -1;
+            x_start_in = clamp(x_start_in, 0, input_width - 1);
+            y_start_in = clamp(y_start_in, 0, input_height - 1);
 
-            if (x_end_in <= x_start_in) x_end_in = x_start_in + 1; // Upewnij się, że jest co najmniej 1 piksel
-            if (x_end_in > input_width) x_end_in = input_width;
-            if (y_end_in <= y_start_in) y_end_in = y_start_in + 1;
-            if (y_end_in > input_height) y_end_in = input_height;
+            // Upewnij się, że jest co najmniej 1 piksel
+            x_end_in = clamp(x_end_in, x_start_in + 1, input_width);
+            y_end_in = clamp(y_end_in, y_start_in + 1, input_height);
 
             float sum = 0.0f;
             int count = 0;
 
+            // Sumowanie wartości pikseli
             for (int y_in = y_start_in; y_in < y_end_in; y_in++) {
                 for (int x_in = x_start_in; x_in < x_end_in; x_in++) {
-                    sum += input_band[y_in * input_width + x_in];
+                    sum += input_band[pixel_index(x_in, y_in, input_width)];
                     count++;
                 }
             }
 
+            // Obliczenie średniej lub fallback do najbliższego sąsiada
             if (count > 0) {
-                output_band[y_out * output_width + x_out] = sum / count;
+                output_band[pixel_index(x_out, y_out, output_width)] = sum / count;
             } else {
                 // Sytuacja awaryjna, nie powinno się zdarzyć przy poprawnym zaciskaniu
-                // Można użyć najbliższego sąsiada jako fallback lub wartości NoData
-                int center_x_in = (x_start_in + x_end_in -1) / 2;
-                int center_y_in = (y_start_in + y_end_in -1) / 2;
-                 if (center_x_in < 0) center_x_in = 0;
-                 if (center_x_in >= input_width) center_x_in = input_width - 1;
-                 if (center_y_in < 0) center_y_in = 0;
-                 if (center_y_in >= input_height) center_y_in = input_height - 1;
-                output_band[y_out * output_width + x_out] = input_band[center_y_in * input_width + center_x_in];
-                // Alternatywnie: output_band[y_out * output_width + x_out] = 0.0f; // lub wartość NoData
+                // Nie pozwalamy na brak przypisania żadnej wartości
+                int center_x_in = (x_start_in + x_end_in - 1) / 2;
+                int center_y_in = (y_start_in + y_end_in - 1) / 2;
+
+                center_x_in = clamp(center_x_in, 0, input_width - 1);
+                center_y_in = clamp(center_y_in, 0, input_height - 1);
+
+                output_band[pixel_index(x_out, y_out, output_width)] =
+                    input_band[pixel_index(center_x_in, center_y_in, input_width)];
             }
         }
     }
+}
+
+float* average_resample_float(
+    const float* input_band,
+    int input_width,
+    int input_height,
+    int output_width,
+    int output_height
+) {
+    char* error_suffix = "in average_resample_float\n";
+    if (!validate_input_params(input_band, input_width, input_height, output_width, output_height)) {
+        fprintf(stderr, error_suffix);
+        return NULL;
+    }
+
+    if (output_width > input_width || output_height > input_height) {
+        fprintf(stderr, "Warning: average_resample_float called for upsampling. Results may be incorrect.\n");
+    }
+
+    size_t num_output_pixels;
+    if (!validate_output_size(output_width, output_height, &num_output_pixels)) {
+        fprintf(stderr, error_suffix);
+        return NULL;
+    }
+
+    float* output_band = allocate_output_band(num_output_pixels);
+    if (output_band == NULL) {
+        fprintf(stderr, error_suffix);
+        return NULL;
+    }
+
+    perform_average_resample(input_band, output_band,
+                       input_width, input_height,
+                       output_width, output_height);
+
     return output_band;
 }

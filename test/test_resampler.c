@@ -55,6 +55,9 @@ void test_resample(int input_width, int input_height, int output_width, int outp
     } else if (strcmp(method, "bilinear") == 0) {
         output_matrix = bilinear_resample_float(
             input_matrix, input_width, input_height, output_width, output_height);
+    } else if (strcmp(method, "average") == 0) {
+        output_matrix = average_resample_float(
+            input_matrix, input_width, input_height, output_width, output_height);
     } else {
         fprintf(stderr, "Error: Unknown resampling method '%s'\n", method);
         free(input_matrix);
@@ -68,8 +71,13 @@ void test_resample(int input_width, int input_height, int output_width, int outp
     }
 
     char output_label[100];
-    snprintf(output_label, sizeof(output_label), "Output Matrix (%s)",
-             strcmp(method, "nearest") == 0 ? "Nearest Neighbor" : "Bilinear");
+    if (strcmp(method, "nearest") == 0) {
+        snprintf(output_label, sizeof(output_label), "Output Matrix (Nearest Neighbor)");
+    } else if (strcmp(method, "bilinear") == 0) {
+        snprintf(output_label, sizeof(output_label), "Output Matrix (Bilinear)");
+    } else if (strcmp(method, "average") == 0) {
+        snprintf(output_label, sizeof(output_label), "Output Matrix (Average)");
+    }
 
     print_matrix(output_matrix, output_width, output_height, output_label);
 
@@ -82,6 +90,7 @@ void print_usage(const char* program_name) {
     printf("Available methods:\n");
     printf("  nearest  - Use Nearest Neighbor resampling\n");
     printf("  bilinear - Use Bilinear resampling\n");
+    printf("  average  - Use Average resampling (best for downsampling)\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -94,41 +103,69 @@ int main(int argc, char* argv[]) {
     const char* method = argv[1];
 
     // Walidacja metody
-    if (strcmp(method, "nearest") != 0 && strcmp(method, "bilinear") != 0) {
+    if (strcmp(method, "nearest") != 0 &&
+        strcmp(method, "bilinear") != 0 &&
+        strcmp(method, "average") != 0) {
         fprintf(stderr, "Error: Unknown method '%s'\n", method);
         print_usage(argv[0]);
         return 1;
     }
 
-    printf("Testing %s Resampling\n",
-           strcmp(method, "nearest") == 0 ? "Nearest Neighbor" : "Bilinear");
+    // Wyświetlanie odpowiedniego nagłówka dla metody
+    if (strcmp(method, "nearest") == 0) {
+        printf("Testing Nearest Neighbor Resampling\n");
+    } else if (strcmp(method, "bilinear") == 0) {
+        printf("Testing Bilinear Resampling\n");
+    } else if (strcmp(method, "average") == 0) {
+        printf("Testing Average Resampling\n");
+    }
 
-    // Test 1: Macierz 2x2 do 4x4 (powiększenie)
-    test_resample(2, 2, 4, 4, "2x2 to 4x4 (enlarge)", method);
+    // Dodatkowy test dla metody average - tylko testy zmniejszania
+    if (strcmp(method, "average") == 0) {
+        // Test 1: Macierz 4x4 do 2x2 (zmniejszenie)
+        test_resample(4, 4, 2, 2, "4x4 to 2x2 (shrink)", method);
 
-    // Test 2: Macierz 4x4 do 2x2 (zmniejszenie)
-    test_resample(4, 4, 2, 2, "4x4 to 2x2 (shrink)", method);
+        // Test 2: Macierz 10x10 do 5x5 (zmniejszenie o połowę)
+        test_resample(10, 10, 5, 5, "10x10 to 5x5 (shrink by half)", method);
 
-    // Test 3: Macierz 3x3 do 6x6 (powiększenie)
-    test_resample(3, 3, 6, 6, "3x3 to 6x6 (enlarge)", method);
+        // Test 3: Macierz 10x10 do 7x7 (zmniejszenie o nietypowy współczynnik)
+        test_resample(10, 10, 7, 7, "10x10 to 7x7 (shrink by non-integer factor)", method);
 
-    // Test 4: Macierz 4x4 do 8x8 (powiększenie)
-    test_resample(4, 4, 8, 8, "4x4 to 8x8 (enlarge)", method);
+        // Test 4: Macierz 8x8 do 3x3 (zmniejszenie o nietypowy współczynnik)
+        test_resample(8, 8, 3, 3, "8x8 to 3x3 (shrink by non-integer factor)", method);
 
-    // Test 5: Macierz 10x1 do 20x2 (powiększenie "płaskiej" macierzy)
-    test_resample(10, 1, 20, 2, "10x1 to 20x2 (enlarge flat matrix)", method);
+        // Test 5: Macierz 6x6 do 2x2 (zmniejszenie o współczynnik 3)
+        test_resample(6, 6, 2, 2, "6x6 to 2x2 (shrink by factor of 3)", method);
+    }
+    else {
+        // Standardowe testy dla nearest i bilinear
+        // Test 1: Macierz 2x2 do 4x4 (powiększenie)
+        test_resample(2, 2, 4, 4, "2x2 to 4x4 (enlarge)", method);
 
-    // Test 6: Macierz 1x10 do 2x20 (powiększenie "wąskiej" macierzy)
-    test_resample(1, 10, 2, 20, "1x10 to 2x20 (enlarge narrow matrix)", method);
+        // Test 2: Macierz 4x4 do 2x2 (zmniejszenie)
+        test_resample(4, 4, 2, 2, "4x4 to 2x2 (shrink)", method);
 
-    // Test 7: Macierz 10x10 do 5x5 (zmniejszenie o połowę)
-    test_resample(10, 10, 5, 5, "10x10 to 5x5 (shrink by half)", method);
+        // Test 3: Macierz 3x3 do 6x6 (powiększenie)
+        test_resample(3, 3, 6, 6, "3x3 to 6x6 (enlarge)", method);
 
-    // Test 8: Macierz 10x10 do 7x7 (zmniejszenie o nietypowy współczynnik)
-    test_resample(10, 10, 7, 7, "10x10 to 7x7 (shrink by non-integer factor)", method);
+        // Test 4: Macierz 4x4 do 8x8 (powiększenie)
+        test_resample(4, 4, 8, 8, "4x4 to 8x8 (enlarge)", method);
+
+        // Test 5: Macierz 10x1 do 20x2 (powiększenie "płaskiej" macierzy)
+        test_resample(10, 1, 20, 2, "10x1 to 20x2 (enlarge flat matrix)", method);
+
+        // Test 6: Macierz 1x10 do 2x20 (powiększenie "wąskiej" macierzy)
+        test_resample(1, 10, 2, 20, "1x10 to 2x20 (enlarge narrow matrix)", method);
+
+        // Test 7: Macierz 10x10 do 5x5 (zmniejszenie o połowę)
+        test_resample(10, 10, 5, 5, "10x10 to 5x5 (shrink by half)", method);
+
+        // Test 8: Macierz 10x10 do 7x7 (zmniejszenie o nietypowy współczynnik)
+        test_resample(10, 10, 7, 7, "10x10 to 7x7 (shrink by non-integer factor)", method);
+    }
 
     return 0;
 }
 
 // Kompilacja: gcc -o test_resampler test_resampler.c ../resampler.c -lm
-// Użycie: ./test_resampler nearest lub ./test_resampler bilinear
+// Użycie: ./test_resampler nearest lub ./test_resampler bilinear lub ./test_resampler average
