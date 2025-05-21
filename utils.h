@@ -5,4 +5,6 @@
 
 const char* get_short_filename(const char *filepath);
 
+size_t pixel_index(int x, int y, int width);
+
 #endif

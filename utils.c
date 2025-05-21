@@ -22,3 +22,8 @@ const char* get_short_filename(const char *filepath) {
     
     return filepath;
 }
+
+// Funkcja obliczająca indeks piksela w obrazie jednowymiarowym
+size_t pixel_index(int x, int y, int width) {
+    return (size_t)(y * width + x);
+}

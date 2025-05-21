@@ -3,6 +3,7 @@
 #include <math.h>
 
 #include "resampler.h"
+#include "utils.h"
 
 int validate_input_params(const float* input_band, int input_width, int input_height,
                                 int output_width, int output_height) {
@@ -45,11 +46,6 @@ int clamp(int value, int min, int max) {
     if (value < min) return min;
     if (value > max) return max;
     return value;
-}
-
-// Funkcja obliczająca indeks piksela w obrazie jednowymiarowym
-size_t pixel_index(int x, int y, int width) {
-    return (size_t)(y * width + x);
 }
 
 float* prepare_data(

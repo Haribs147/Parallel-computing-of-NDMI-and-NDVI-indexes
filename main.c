@@ -1,4 +1,4 @@
-#include "gui.h" // Dołączamy nagłówek z deklaracją run_gui
+#include "gui.h"
 
 int main(int argc, char *argv[]) {
     return run_gui(argc, argv);

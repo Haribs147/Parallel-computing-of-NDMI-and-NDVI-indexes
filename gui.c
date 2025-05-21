@@ -633,8 +633,7 @@ static gboolean on_draw_map_area(GtkWidget *widget, cairo_t *cr, gpointer user_d
 
     GdkPixbuf *pixbuf = generate_pixbuf_from_index_data(data_to_render,
                                                         map_data->width,
-                                                        map_data->height,
-                                                        map_data->current_map_type);
+                                                        map_data->height);
     if (pixbuf) {
         gdk_cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
         cairo_paint(cr);
