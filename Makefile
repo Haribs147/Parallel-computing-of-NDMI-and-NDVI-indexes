@@ -25,7 +25,7 @@ CFLAGS = $(GTK_CFLAGS) $(GDAL_CFLAGS) -Wall -g -std=c11
 LIBS = $(GTK_LIBS) $(GDAL_LIBS) -lm
 
 # Pliki źródłowe
-SRCS = main.c gui.c data_loader.c resampler.c utils.c index_calculator.c visualization.c
+SRCS = main.c gui.c gui_utils.c data_loader.c resampler.c utils.c index_calculator.c visualization.c
 
 # Pliki obiektowe (automatycznie generowane z .c na .o)
 OBJS = $(SRCS:.c=.o)
@@ -36,13 +36,15 @@ all: $(TARGET)
 # Reguła linkowania: tworzy plik wykonywalny z plików obiektowych
 $(TARGET): $(OBJS)
 	@$(CC) $(OBJS) -o $(TARGET) $(LIBS)
-
 # Reguły kompilacji
 main.o: main.c gui.h
 	@$(CC) $(CFLAGS) -c main.c -o main.o
 
-gui.o: gui.c gui.h data_loader.h resampler.h utils.h index_calculator.h visualization.h
+gui.o: gui.c gui.h gui_utils.h data_loader.h resampler.h utils.h index_calculator.h visualization.h
 	@$(CC) $(CFLAGS) -c gui.c -o gui.o
+
+gui_utils.o: gui_utils.c gui_utils.h utils.h
+	@$(CC) $(CFLAGS) -c gui_utils.c -o gui_utils.o
 
 data_loader.o: data_loader.c data_loader.h
 	@$(CC) $(CFLAGS) -c data_loader.c -o data_loader.o

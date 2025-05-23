@@ -5,9 +5,9 @@
 #include <math.h>
 #include <float.h>
 #include <string.h>
-#include <pango/pango.h>
 
 #include "gui.h"
+#include "gui_utils.h"
 #include "data_loader.h"
 #include "resampler.h"
 #include "utils.h"
@@ -26,12 +26,10 @@ typedef struct
     char current_map_type[10];
 } IndexMapData;
 
-// ZMODYFIKOWANA struktura dla handlera "delete-event"
 typedef struct
 {
     GtkApplication* app;
-    IndexMapData* map_data_to_free; // Dane do zwolnienia przez handler
-    // map_window_widget usunięte, użyjemy argumentu 'widget' z callbacku
+    IndexMapData* map_data_to_free;
 } MapWindowCloseAndCleanupData;
 
 // Deklaracje wprzód
@@ -39,16 +37,9 @@ static void create_and_show_map_window(GtkApplication* app, gpointer user_data);
 static void activate_config_window(GtkApplication* app, gpointer user_data);
 static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr, gpointer user_data);
 static gboolean on_map_window_delete_event_manual_cleanup(GtkWidget* widget, GdkEvent* event, gpointer user_data);
-static void on_config_window_destroy(GtkWidget* widget, gpointer data); // Nowa
-static gboolean destroy_widget_idle(gpointer data); // Nowa
-static const BandConfig* get_band_config(const gchar* dialog_title_suffix);
-static GtkWidget* create_file_dialog(GtkWindow* parent, const char* title);
-static void set_button_label_ellipsis(GtkButton* button);
-static void update_button_label(GtkButton* button, const char* filepath, const char* prefix);
-static void update_file_selection(char** target_path_variable, GtkButton* button_to_update,
-                                 GtkFileChooser* file_chooser, const BandConfig* config);
-static GtkWidget* create_button_with_ellipsis(const char* label);
+static void on_config_window_destroy(GtkWidget* widget, gpointer data);
 
+// Zmienne globalne
 static char* path_b04 = NULL;
 static char* path_b08 = NULL;
 static char* path_b11 = NULL;
@@ -62,13 +53,6 @@ static GtkWidget* btn_load_scl_widget = NULL;
 
 // Statyczny wskaźnik do okna konfiguracji
 static GtkWidget* the_config_window = NULL;
-
-static GtkWidget* create_button_with_ellipsis(const char* label) {
-    GtkWidget* button = gtk_button_new_with_label(label);
-    set_button_label_ellipsis(GTK_BUTTON(button));
-    return button;
-}
-
 
 static void free_index_map_data(gpointer data)
 {
@@ -111,92 +95,7 @@ static void free_index_map_data(gpointer data)
     g_print("== free_index_map_data: Zakończono zwalnianie danych mapy dla wskaźnika %p ==\n", data);
 }
 
-static const BandConfig* get_band_config(const gchar* dialog_title_suffix) {
-    for (int i = 0; band_configs[i].suffix != NULL; i++) {
-        if (g_strcmp0(dialog_title_suffix, band_configs[i].suffix) == 0) {
-            return &band_configs[i];
-        }
-    }
-    return &band_configs[4]; // default
-}
-
-static GtkWidget* create_file_dialog(GtkWindow* parent, const char* title) {
-    GtkWidget* dialog = gtk_file_chooser_dialog_new(
-        title, parent, GTK_FILE_CHOOSER_ACTION_OPEN,
-        "_Anuluj", GTK_RESPONSE_CANCEL,
-        "_Otwórz", GTK_RESPONSE_ACCEPT, NULL);
-
-    // Filtr JP2
-    GtkFileFilter* filter = gtk_file_filter_new();
-    gtk_file_filter_set_name(filter, "Obrazy JP2 (*.jp2)");
-    gtk_file_filter_add_pattern(filter, "*.jp2");
-    gtk_file_filter_add_pattern(filter, "*.JP2");
-    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), filter);
-
-    return dialog;
-}
-
-static void set_button_label_ellipsis(GtkButton* button) {
-    GList* children = gtk_container_get_children(GTK_CONTAINER(button));
-    if (children != NULL) {
-        GtkWidget* label_widget = GTK_WIDGET(children->data);
-        if (GTK_IS_LABEL(label_widget)) {
-            gtk_label_set_ellipsize(GTK_LABEL(label_widget), PANGO_ELLIPSIZE_END);
-        }
-        g_list_free(children);
-    }
-}
-
-static void update_button_label(GtkButton* button, const char* filepath, const char* prefix) {
-    const char* short_name = get_short_filename(filepath);
-
-    char new_label[256];
-    snprintf(new_label, sizeof(new_label), "%s%s", prefix, short_name);
-    gtk_button_set_label(button, new_label);
-
-    // Ustawienie ellipsis dla długich nazw
-    set_button_label_ellipsis(button);
-}
-
-static void update_file_selection(char** target_path_variable, GtkButton* button_to_update,
-                                 GtkFileChooser* file_chooser, const BandConfig* config) {
-    char* filename_path = gtk_file_chooser_get_filename(file_chooser);
-    if (!filename_path) {
-        return; // Brak wybranego pliku
-    }
-
-    // Zwolnienie starej ścieżki
-    if (*target_path_variable) {
-        g_free(*target_path_variable);
-    }
-    *target_path_variable = g_strdup(filename_path);
-
-    // Aktualizacja etykiety przycisku
-    update_button_label(button_to_update, filename_path, config->prefix);
-
-    g_free(filename_path);
-}
-
-static void handle_file_selection(GtkWindow* parent_window, const gchar* dialog_title_suffix,
-                                  char** target_path_variable, GtkButton* button_to_update) {
-    const BandConfig* config = get_band_config(dialog_title_suffix);
-
-    char dialog_title[150];
-    snprintf(dialog_title, sizeof(dialog_title), "Wybierz plik dla %s", dialog_title_suffix);
-
-    GtkWidget* dialog = create_file_dialog(parent_window, dialog_title);
-    gint res = gtk_dialog_run(GTK_DIALOG(dialog));
-
-    if (res == GTK_RESPONSE_ACCEPT) {
-        update_file_selection(target_path_variable, button_to_update,
-                             GTK_FILE_CHOOSER(dialog), config);
-    } else if (!(*target_path_variable)) {
-        gtk_button_set_label(button_to_update, config->default_text);
-    }
-
-    gtk_widget_destroy(dialog);
-}
-
+// Funkcje obsługi zdarzeń dla przycisków ładowania
 static void on_load_b04_clicked(GtkWidget* widget, gpointer data)
 {
     handle_file_selection(GTK_WINDOW(data), "pasma B04", &path_b04, GTK_BUTTON(widget));
@@ -216,7 +115,6 @@ static void on_load_scl_clicked(GtkWidget* widget, gpointer data)
 {
     handle_file_selection(GTK_WINDOW(data), "pasma SCL", &path_scl, GTK_BUTTON(widget));
 }
-
 
 static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
 {
@@ -290,17 +188,13 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
     }
     pafSCLProcessed = pafSCLData;
 
-    // g_print("Wszystkie wymagane pasma wczytane pomyślnie.\n"); // Mniej gadatliwe
-
     if (res_10m_selected)
     {
         final_processing_width = nBand4Width;
         final_processing_height = nBand4Height;
-        // g_print("Docelowa rozdzielczość: 10m (%dx%d)\n", final_processing_width, final_processing_height);
 
         if (nBand11Width != final_processing_width || nBand11Height != final_processing_height)
         {
-            // g_print("Upsampling B11 do %dx%d...\n", final_processing_width, final_processing_height);
             float* resampled_b11 = bilinear_resample_float(pafBand11Data, nBand11Width, nBand11Height,
                                                            final_processing_width, final_processing_height);
             if (resampled_b11)
@@ -309,7 +203,6 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
                 else { free(pafBand11Processed); }
                 pafBand11Data = NULL;
                 pafBand11Processed = resampled_b11;
-                // g_print("Upsampling B11 zakończony.\n");
             }
             else
             {
@@ -319,7 +212,6 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
         }
         if (nSCLWidth != final_processing_width || nSCLHeight != final_processing_height)
         {
-            // g_print("Upsampling SCL do %dx%d...\n", final_processing_width, final_processing_height);
             float* resampled_scl = nearest_neighbor_resample_scl(pafSCLData, nSCLWidth, nSCLHeight,
                                                                  final_processing_width, final_processing_height);
             if (resampled_scl)
@@ -328,7 +220,6 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
                 else { free(pafSCLProcessed); }
                 pafSCLData = NULL;
                 pafSCLProcessed = resampled_scl;
-                // g_print("Upsampling SCL zakończony.\n");
             }
             else
             {
@@ -341,10 +232,8 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
     {
         final_processing_width = nBand11Width;
         final_processing_height = nBand11Height;
-        // g_print("Docelowa rozdzielczość: 20m (%dx%d)\n", final_processing_width, final_processing_height);
         if (nBand4Width != final_processing_width || nBand4Height != final_processing_height)
         {
-            // g_print("Downsampling B04 do %dx%d...\n", final_processing_width, final_processing_height);
             float* resampled_b04 = average_resample_float(pafBand4Data, nBand4Width, nBand4Height,
                                                           final_processing_width, final_processing_height);
             if (resampled_b04)
@@ -353,7 +242,6 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
                 else { free(pafBand4Processed); }
                 pafBand4Data = NULL;
                 pafBand4Processed = resampled_b04;
-                // g_print("Downsampling B04 zakończony.\n");
             }
             else
             {
@@ -363,7 +251,6 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
         }
         if (nBand8Width != final_processing_width || nBand8Height != final_processing_height)
         {
-            // g_print("Downsampling B08 do %dx%d...\n", final_processing_width, final_processing_height);
             float* resampled_b08 = average_resample_float(pafBand8Data, nBand8Width, nBand8Height,
                                                           final_processing_width, final_processing_height);
             if (resampled_b08)
@@ -372,7 +259,6 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
                 else { free(pafBand8Processed); }
                 pafBand8Data = NULL;
                 pafBand8Processed = resampled_b08;
-                // g_print("Downsampling B08 zakończony.\n");
             }
             else
             {
@@ -382,7 +268,6 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
         }
     }
 
-    // g_print("\nObliczanie wskaźników NDVI i NDMI...\n");
     ndvi_result = calculate_ndvi(pafBand8Processed, pafBand4Processed,
                                  final_processing_width, final_processing_height,
                                  pafSCLProcessed);
@@ -391,7 +276,6 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
         fprintf(stderr, "Błąd podczas obliczania NDVI.\n");
         goto cleanup_processing_error;
     }
-    // printf("Obliczono NDVI (bufor: %p).\n", (void*)ndvi_result);
 
     ndmi_result = calculate_ndmi(pafBand8Processed, pafBand11Processed,
                                  final_processing_width, final_processing_height,
@@ -401,8 +285,6 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
         fprintf(stderr, "Błąd podczas obliczania NDMI.\n");
         goto cleanup_processing_error;
     }
-    // printf("Obliczono NDMI (bufor: %p).\n", (void*)ndmi_result);
-    // g_print("Obliczanie wskaźników zakończone.\n");
 
     if (pafBand4Processed)
     {
@@ -424,9 +306,7 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
         free(pafSCLProcessed);
         pafSCLProcessed = NULL;
     }
-    // g_print("Zwolniono pamięć po przetworzonych pasmach (użytych do obliczenia wskaźników).\n");
 
-    // g_print("Przygotowywanie danych do wyświetlenia...\n");
     map_display_data = g_new(IndexMapData, 1);
     if (!map_display_data)
     {
@@ -446,24 +326,14 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
     create_and_show_map_window(app, map_display_data);
     map_display_data = NULL;
 
-    // Nie niszczymy config_window_widget tutaj, jeśli the_config_window go śledzi.
-    // Zamiast tego, on_map_window_delete_event_manual_cleanup aktywuje aplikację,
-    // a activate_config_window pokaże istniejące the_config_window.
-    // Jeśli config_window_widget ma być jednorazowe, to gtk_widget_destroy jest OK.
-    // Dla tego przepływu, config_window jest niszczone, a nowe tworzone/pokazywane przez activate.
     if (config_window_widget == the_config_window)
     {
-        // Jeśli to jest to samo okno, które śledzimy globalnie, nie niszczymy go tutaj,
-        // bo chcemy do niego wrócić. Zostanie zniszczone, gdy użytkownik je zamknie.
-        // Jednak activate_config_window i tak stworzy nowe, jeśli the_config_window jest NULL.
-        // Aby uniknąć wielu okien konfiguracji, niszczymy to.
         g_print("Niszczenie starego okna konfiguracji po utworzeniu mapy.\n");
         gtk_widget_destroy(config_window_widget);
-        // the_config_window zostanie ustawione na NULL przez on_config_window_destroy
     }
     else
     {
-        gtk_widget_destroy(config_window_widget); // Jeśli to nie jest śledzone okno
+        gtk_widget_destroy(config_window_widget);
     }
     return;
 
@@ -515,7 +385,6 @@ static void on_config_radio_resolution_toggled(GtkToggleButton* togglebutton, gp
         const gchar* label = gtk_button_get_label(GTK_BUTTON(togglebutton));
         if (g_str_has_prefix(label, "upscaling")) { res_10m_selected = TRUE; }
         else if (g_str_has_prefix(label, "downscaling")) { res_10m_selected = FALSE; }
-        // g_print("Wybrano rozdzielczość (konfiguracja): %s\n", res_10m_selected ? "10m" : "20m");
     }
 }
 
@@ -533,7 +402,7 @@ static void on_map_type_radio_toggled(GtkToggleButton* togglebutton, gpointer us
         const gchar* label = gtk_button_get_label(GTK_BUTTON(togglebutton));
         if (g_strcmp0(label, "NDVI") == 0) { strcpy(map_data->current_map_type, "NDVI"); }
         else if (g_strcmp0(label, "NDMI") == 0) { strcpy(map_data->current_map_type, "NDMI"); }
-        // g_print("Wybrano typ mapy do wyświetlenia: %s\n", map_data->current_map_type);
+
         if (GTK_IS_WIDGET(drawing_area) && gtk_widget_get_realized(drawing_area) &&
             gtk_widget_get_visible(drawing_area))
         {
@@ -541,28 +410,6 @@ static void on_map_type_radio_toggled(GtkToggleButton* togglebutton, gpointer us
         }
     }
 }
-
-// Funkcja pomocnicza do odroczonego niszczenia widgetu
-static gboolean destroy_widget_idle(gpointer data)
-{
-    GtkWidget* widget_to_destroy = GTK_WIDGET(data);
-    // Sprawdź, czy widget nadal istnieje i jest widgetem GTK
-    // gtk_widget_in_destruction sprawdza, czy widget jest już w trakcie niszczenia
-    if (widget_to_destroy && GTK_IS_WIDGET(widget_to_destroy) && !gtk_widget_in_destruction(widget_to_destroy))
-    {
-        g_print("destroy_widget_idle: Niszczenie widgetu %p (odroczone).\n", (void*)widget_to_destroy);
-        gtk_widget_destroy(widget_to_destroy);
-    }
-    else
-    {
-        g_print(
-            "destroy_widget_idle: Widget %p już zniszczony, w trakcie niszczenia lub nie jest widgetem. Nie niszczę ponownie.\n",
-            (void*)widget_to_destroy);
-    }
-    g_object_unref(widget_to_destroy); // Zwolnij referencję dodaną dla g_idle_add
-    return G_SOURCE_REMOVE; // Usuń źródło bezczynności po wykonaniu
-}
-
 
 static gboolean on_map_window_delete_event_manual_cleanup(GtkWidget* widget, GdkEvent* event, gpointer user_data)
 {
@@ -576,7 +423,7 @@ static gboolean on_map_window_delete_event_manual_cleanup(GtkWidget* widget, Gdk
     }
 
     // 1. Upewnij się, że drawing_area nie będzie już próbowało używać map_data.
-    GtkWidget* toplevel = gtk_widget_get_toplevel(widget); // widget to okno mapy
+    GtkWidget* toplevel = gtk_widget_get_toplevel(widget);
     if (GTK_IS_WINDOW(toplevel))
     {
         GtkWidget* main_vbox = gtk_bin_get_child(GTK_BIN(toplevel));
@@ -634,7 +481,6 @@ static gboolean on_map_window_delete_event_manual_cleanup(GtkWidget* widget, Gdk
     g_object_ref(widget); // Dodaj referencję, bo widget będzie użyty w idle callback
     g_idle_add(destroy_widget_idle, widget);
 
-
     // 6. Zwolnij strukturę MapWindowCloseAndCleanupData
     g_print("on_map_window_delete_event_manual_cleanup: Zwalnianie struktury cleanup_data %p.\n", (void*)cleanup_data);
     g_free(cleanup_data);
@@ -642,7 +488,6 @@ static gboolean on_map_window_delete_event_manual_cleanup(GtkWidget* widget, Gdk
     g_print("== on_map_window_delete_event_manual_cleanup: Zakończono (zniszczenie okna odroczone). ==\n");
     return TRUE; // Zdarzenie w pełni obsłużone
 }
-
 
 static void create_and_show_map_window(GtkApplication* app, gpointer user_data)
 {
@@ -719,10 +564,6 @@ static void create_and_show_map_window(GtkApplication* app, gpointer user_data)
     g_signal_connect(drawing_area_map, "draw", G_CALLBACK(on_draw_map_area), passed_map_data);
     gtk_container_add(GTK_CONTAINER(scrolled_window_for_map), drawing_area_map);
 
-    // g_print("Wyświetlanie okna mapy z danymi: NDVI (%p), NDMI (%p), Wymiary: %dx%d, Typ: %s\n",
-    //         (void*)passed_map_data->ndvi_data, (void*)passed_map_data->ndmi_data,
-    //         passed_map_data->width, passed_map_data->height, passed_map_data->current_map_type);
-
     gtk_widget_show_all(map_window);
 }
 
@@ -737,7 +578,6 @@ static void on_config_window_destroy(GtkWidget* widget, gpointer data)
     }
 }
 
-// ZMODYFIKOWANA activate_config_window z użyciem statycznego wskaźnika
 static void activate_config_window(GtkApplication* app, gpointer user_data)
 {
     if (the_config_window)
@@ -750,7 +590,6 @@ static void activate_config_window(GtkApplication* app, gpointer user_data)
         }
         else
         {
-            // Jeśli okno istnieje, ale nie jest widoczne (np. zostało ukryte), pokaż je
             g_print("activate_config_window: Okno konfiguracji już istnieje, ale nie jest widoczne, pokazuję %p.\n",
                     (void*)the_config_window);
             gtk_widget_show_all(the_config_window);
@@ -760,7 +599,7 @@ static void activate_config_window(GtkApplication* app, gpointer user_data)
     }
 
     g_print("activate_config_window: Tworzenie nowego okna konfiguracji.\n");
-    GtkWidget* config_window_local; // Użyj lokalnej zmiennej
+    GtkWidget* config_window_local;
     GtkWidget* main_vbox;
     GtkWidget* radio_hbox_config;
     GtkWidget* load_buttons_hbox;
@@ -772,9 +611,8 @@ static void activate_config_window(GtkApplication* app, gpointer user_data)
     gtk_window_set_default_size(GTK_WINDOW(config_window_local), DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
     gtk_container_set_border_width(GTK_CONTAINER(config_window_local), 10);
 
-    the_config_window = config_window_local; // Zapisz do statycznego wskaźnika
+    the_config_window = config_window_local;
     g_signal_connect(the_config_window, "destroy", G_CALLBACK(on_config_window_destroy), NULL);
-
 
     main_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_container_add(GTK_CONTAINER(config_window_local), main_vbox);
