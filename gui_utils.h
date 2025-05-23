@@ -10,6 +10,25 @@ typedef struct {
     const char* default_text;
 } BandConfig;
 
+typedef struct {
+    char** path;
+    GtkWidget** button;
+    float** raw_data;
+    float** processed_data;
+    int* width;
+    int* height;
+    const char* band_name;
+    int band_index;
+} BandData;
+
+enum BandType
+{
+    B04,
+    B08,
+    B11,
+    SCL
+};
+
 extern const BandConfig band_configs[];
 
 // Funkcje do tworzenia i konfigurowania widgetów

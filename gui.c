@@ -17,6 +17,7 @@
 #define DEFAULT_WINDOW_WIDTH 900
 #define DEFAULT_WINDOW_HEIGHT 750
 
+
 typedef struct
 {
     float* ndvi_data;
@@ -116,200 +117,155 @@ static void on_load_scl_clicked(GtkWidget* widget, gpointer data)
     handle_file_selection(GTK_WINDOW(data), "pasma SCL", &path_scl, GTK_BUTTON(widget));
 }
 
+static int validate_band_paths(BandData bands[], int band_count, GtkWindow* parent_window)
+{
+    for(int i = 0; i < band_count; i++) {
+        if(!*(bands[i].path)) {
+            GtkWidget* error_dialog = gtk_message_dialog_new(parent_window, GTK_DIALOG_DESTROY_WITH_PARENT,
+                                                             GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
+                                                             "Błąd: Nie wszystkie pasma zostały wybrane!\n\nProszę wybrać pliki dla pasm B04, B08, B11 oraz SCL.");
+            gtk_window_set_title(GTK_WINDOW(error_dialog), "Błąd wyboru plików");
+            gtk_dialog_run(GTK_DIALOG(error_dialog));
+            gtk_widget_destroy(error_dialog);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int load_all_bands_data(BandData bands[4])
+{
+    // Wczytywanie danych dla wszystkich pasm
+    for(int i = 0; i < 4; i++) {
+        *(bands[i].raw_data) = LoadBandData(*(bands[i].path), bands[i].width, bands[i].height);
+        if(!*(bands[i].raw_data)) {
+            fprintf(stderr, "Błąd wczytywania %s!\n", bands[i].band_name);
+            return -1;
+        }
+        *(bands[i].processed_data) = *(bands[i].raw_data);
+    }
+    return 0;
+}
+
 static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
 {
     GtkWidget* config_window_widget = GTK_WIDGET(user_data);
     GtkWindow* parent_gtk_window = GTK_WINDOW(user_data);
 
-    g_print("Przycisk 'Rozpocznij' kliknięty.\n");
+    // Inicjalizacja struktury danych pasm
+    int widths[4], heights[4];
+    float* raw_data[4] = {NULL};
+    float* processed_data[4] = {NULL};
 
-    if (!path_b04 || !path_b08 || !path_b11 || !path_scl)
-    {
-        GtkWidget* error_dialog = gtk_message_dialog_new(parent_gtk_window, GTK_DIALOG_DESTROY_WITH_PARENT,
-                                                         GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
-                                                         "Błąd: Nie wszystkie pasma zostały wybrane!\n\nProszę wybrać pliki dla pasm B04, B08, B11 oraz SCL.");
-        gtk_window_set_title(GTK_WINDOW(error_dialog), "Błąd wyboru plików");
-        gtk_dialog_run(GTK_DIALOG(error_dialog));
-        gtk_widget_destroy(error_dialog);
-        return;
-    }
-
-    g_print("\nRozpoczynanie wczytywania danych pasm...\n");
-    float* pafBand4Data = NULL;
-    int nBand4Width = 0, nBand4Height = 0;
-    float* pafBand8Data = NULL;
-    int nBand8Width = 0, nBand8Height = 0;
-    float* pafBand11Data = NULL;
-    int nBand11Width = 0, nBand11Height = 0;
-    float* pafSCLData = NULL;
-    int nSCLWidth = 0, nSCLHeight = 0;
-
-    float* pafBand4Processed = NULL;
-    float* pafBand8Processed = NULL;
-    float* pafBand11Processed = NULL;
-    float* pafSCLProcessed = NULL;
+    BandData bands[4] = {
+        {&path_b04, &btn_load_b04_widget, &raw_data[0], &processed_data[0], &widths[0], &heights[0], "B04", 0},
+        {&path_b08, &btn_load_b08_widget, &raw_data[1], &processed_data[1], &widths[1], &heights[1], "B08", 1},
+        {&path_b11, &btn_load_b11_widget, &raw_data[2], &processed_data[2], &widths[2], &heights[2], "B11", 2},
+        {&path_scl, &btn_load_scl_widget, &raw_data[3], &processed_data[3], &widths[3], &heights[3], "SCL", 3}
+    };
 
     float* ndvi_result = NULL;
     float* ndmi_result = NULL;
     IndexMapData* map_display_data = NULL;
-
     int final_processing_width;
     int final_processing_height;
 
-    pafBand4Data = LoadBandData(path_b04, &nBand4Width, &nBand4Height);
-    if (!pafBand4Data)
+    if (!validate_band_paths(bands, 4, parent_gtk_window)) {
+        return;
+    }
+
+    g_print("[%s] Rozpoczynanie wczytywania danych pasm.\n", get_timestamp());
+
+    if (load_all_bands_data(bands) != 0)
     {
-        fprintf(stderr, "Błąd wczytywania B04!\n");
         goto cleanup_processing_error;
     }
-    pafBand4Processed = pafBand4Data;
 
-    pafBand8Data = LoadBandData(path_b08, &nBand8Width, &nBand8Height);
-    if (!pafBand8Data)
-    {
-        fprintf(stderr, "Błąd wczytywania B08!\n");
-        goto cleanup_processing_error;
+
+    // Określenie docelowej rozdzielczości
+    if (res_10m_selected) {
+        final_processing_width = *bands[B04].width;
+        final_processing_height = *bands[B04].height;
+    } else {
+        final_processing_width = *bands[B11].width;
+        final_processing_height = *bands[B11].height;
     }
-    pafBand8Processed = pafBand8Data;
 
-    pafBand11Data = LoadBandData(path_b11, &nBand11Width, &nBand11Height);
-    if (!pafBand11Data)
-    {
-        fprintf(stderr, "Błąd wczytywania B11!\n");
-        goto cleanup_processing_error;
-    }
-    pafBand11Processed = pafBand11Data;
+    // Resampling pasm do docelowej rozdzielczości
+    for(int i = 0; i < 4; i++) {
+        if(*bands[i].width != final_processing_width || *bands[i].height != final_processing_height) {
+            float* resampled = NULL;
 
-    pafSCLData = LoadBandData(path_scl, &nSCLWidth, &nSCLHeight);
-    if (!pafSCLData)
-    {
-        fprintf(stderr, "Błąd wczytywania SCL!\n");
-        goto cleanup_processing_error;
-    }
-    pafSCLProcessed = pafSCLData;
+            if(res_10m_selected) {
+                // Upsampling B11 i SCL do 10m
+                if(i == B11) { // B11 - bilinear interpolation
+                    resampled = bilinear_resample_float(*(bands[i].raw_data), *bands[i].width, *bands[i].height,
+                                                        final_processing_width, final_processing_height);
+                    if(!resampled) {
+                        fprintf(stderr, "Błąd upsamplingu %s.\n", bands[i].band_name);
+                        goto cleanup_processing_error;
+                    }
+                } else if(i == SCL) { // SCL - nearest neighbor
+                    resampled = nearest_neighbor_resample_scl(*(bands[i].raw_data), *bands[i].width, *bands[i].height,
+                                                              final_processing_width, final_processing_height);
+                    if(!resampled) {
+                        fprintf(stderr, "Błąd upsamplingu %s.\n", bands[i].band_name);
+                        goto cleanup_processing_error;
+                    }
+                }
+            } else {
+                // Downsampling B04 i B08 do 20m
+                if(i == B04 || i == B08) { // B04 lub B08 - averaging
+                    resampled = average_resample_float(*(bands[i].raw_data), *bands[i].width, *bands[i].height,
+                                                       final_processing_width, final_processing_height);
+                    if(!resampled) {
+                        fprintf(stderr, "Błąd downsamplingu %s.\n", bands[i].band_name);
+                        goto cleanup_processing_error;
+                    }
+                }
+            }
 
-    if (res_10m_selected)
-    {
-        final_processing_width = nBand4Width;
-        final_processing_height = nBand4Height;
-
-        if (nBand11Width != final_processing_width || nBand11Height != final_processing_height)
-        {
-            float* resampled_b11 = bilinear_resample_float(pafBand11Data, nBand11Width, nBand11Height,
-                                                           final_processing_width, final_processing_height);
-            if (resampled_b11)
-            {
-                if (pafBand11Processed == pafBand11Data) { free(pafBand11Data); }
-                else { free(pafBand11Processed); }
-                pafBand11Data = NULL;
-                pafBand11Processed = resampled_b11;
-            }
-            else
-            {
-                fprintf(stderr, "Błąd upsamplingu B11.\n");
-                goto cleanup_processing_error;
-            }
-        }
-        if (nSCLWidth != final_processing_width || nSCLHeight != final_processing_height)
-        {
-            float* resampled_scl = nearest_neighbor_resample_scl(pafSCLData, nSCLWidth, nSCLHeight,
-                                                                 final_processing_width, final_processing_height);
-            if (resampled_scl)
-            {
-                if (pafSCLProcessed == pafSCLData) { free(pafSCLData); }
-                else { free(pafSCLProcessed); }
-                pafSCLData = NULL;
-                pafSCLProcessed = resampled_scl;
-            }
-            else
-            {
-                fprintf(stderr, "Błąd upsamplingu SCL.\n");
-                goto cleanup_processing_error;
-            }
-        }
-    }
-    else
-    {
-        final_processing_width = nBand11Width;
-        final_processing_height = nBand11Height;
-        if (nBand4Width != final_processing_width || nBand4Height != final_processing_height)
-        {
-            float* resampled_b04 = average_resample_float(pafBand4Data, nBand4Width, nBand4Height,
-                                                          final_processing_width, final_processing_height);
-            if (resampled_b04)
-            {
-                if (pafBand4Processed == pafBand4Data) { free(pafBand4Data); }
-                else { free(pafBand4Processed); }
-                pafBand4Data = NULL;
-                pafBand4Processed = resampled_b04;
-            }
-            else
-            {
-                fprintf(stderr, "Błąd downsamplingu B04.\n");
-                goto cleanup_processing_error;
-            }
-        }
-        if (nBand8Width != final_processing_width || nBand8Height != final_processing_height)
-        {
-            float* resampled_b08 = average_resample_float(pafBand8Data, nBand8Width, nBand8Height,
-                                                          final_processing_width, final_processing_height);
-            if (resampled_b08)
-            {
-                if (pafBand8Processed == pafBand8Data) { free(pafBand8Data); }
-                else { free(pafBand8Processed); }
-                pafBand8Data = NULL;
-                pafBand8Processed = resampled_b08;
-            }
-            else
-            {
-                fprintf(stderr, "Błąd downsamplingu B08.\n");
-                goto cleanup_processing_error;
+            // Zamiana danych na nowe po resamplingu
+            if(resampled) {
+                if(*(bands[i].processed_data) == *(bands[i].raw_data)) {
+                    free(*(bands[i].raw_data));
+                } else {
+                    free(*(bands[i].processed_data));
+                }
+                *(bands[i].raw_data) = NULL;
+                *(bands[i].processed_data) = resampled;
             }
         }
     }
 
-    ndvi_result = calculate_ndvi(pafBand8Processed, pafBand4Processed,
+    // Obliczanie wskaźników NDVI i NDMI
+    ndvi_result = calculate_ndvi(*bands[B08].processed_data, *bands[B04].processed_data,
                                  final_processing_width, final_processing_height,
-                                 pafSCLProcessed);
-    if (!ndvi_result)
-    {
+                                 *bands[SCL].processed_data);
+    if (!ndvi_result) {
         fprintf(stderr, "Błąd podczas obliczania NDVI.\n");
         goto cleanup_processing_error;
     }
 
-    ndmi_result = calculate_ndmi(pafBand8Processed, pafBand11Processed,
+    ndmi_result = calculate_ndmi(*bands[B08].processed_data, *bands[B11].processed_data,
                                  final_processing_width, final_processing_height,
-                                 pafSCLProcessed);
-    if (!ndmi_result)
-    {
+                                 *bands[SCL].processed_data);
+    if (!ndmi_result) {
         fprintf(stderr, "Błąd podczas obliczania NDMI.\n");
         goto cleanup_processing_error;
     }
 
-    if (pafBand4Processed)
-    {
-        free(pafBand4Processed);
-        pafBand4Processed = NULL;
-    }
-    if (pafBand8Processed)
-    {
-        free(pafBand8Processed);
-        pafBand8Processed = NULL;
-    }
-    if (pafBand11Processed)
-    {
-        free(pafBand11Processed);
-        pafBand11Processed = NULL;
-    }
-    if (pafSCLProcessed)
-    {
-        free(pafSCLProcessed);
-        pafSCLProcessed = NULL;
+    // Zwolnienie pamięci po przetworzonych danych pasm
+    for(int i = 0; i < 4; i++) {
+        if(*(bands[i].processed_data)) {
+            free(*(bands[i].processed_data));
+            *(bands[i].processed_data) = NULL;
+        }
     }
 
+    // Przygotowanie danych do wyświetlenia
     map_display_data = g_new(IndexMapData, 1);
-    if (!map_display_data)
-    {
+    if (!map_display_data) {
         fprintf(stderr, "Błąd alokacji pamięci dla IndexMapData.\n");
         goto cleanup_processing_error;
     }
@@ -322,52 +278,50 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
     map_display_data->height = final_processing_height;
     strcpy(map_display_data->current_map_type, "NDVI");
 
+    // Utworzenie okna mapy
     GtkApplication* app = gtk_window_get_application(GTK_WINDOW(config_window_widget));
     create_and_show_map_window(app, map_display_data);
     map_display_data = NULL;
 
-    if (config_window_widget == the_config_window)
-    {
+    // Zniszczenie okna konfiguracji
+    if (config_window_widget == the_config_window) {
         g_print("Niszczenie starego okna konfiguracji po utworzeniu mapy.\n");
         gtk_widget_destroy(config_window_widget);
-    }
-    else
-    {
+    } else {
         gtk_widget_destroy(config_window_widget);
     }
     return;
 
 cleanup_processing_error:
     g_print("Wystąpił błąd w on_rozpocznij_clicked, zwalnianie zasobów...\n");
-    if (ndvi_result)
-    {
+
+    // Zwolnienie wyników obliczeń
+    if (ndvi_result) {
         free(ndvi_result);
         ndvi_result = NULL;
     }
-    if (ndmi_result)
-    {
+    if (ndmi_result) {
         free(ndmi_result);
         ndmi_result = NULL;
     }
-    if (map_display_data)
-    {
+    if (map_display_data) {
         free_index_map_data(map_display_data);
         map_display_data = NULL;
     }
 
-    if (pafBand4Processed) free(pafBand4Processed);
-    else if (pafBand4Data) free(pafBand4Data);
-    if (pafBand8Processed) free(pafBand8Processed);
-    else if (pafBand8Data) free(pafBand8Data);
-    if (pafBand11Processed) free(pafBand11Processed);
-    else if (pafBand11Data) free(pafBand11Data);
-    if (pafSCLProcessed) free(pafSCLProcessed);
-    else if (pafSCLData) free(pafSCLData);
-    pafBand4Data = pafBand8Data = pafBand11Data = pafSCLData = NULL;
-    pafBand4Processed = pafBand8Processed = pafBand11Processed = pafSCLProcessed = NULL;
+    // Zwolnienie danych pasm
+    for(int i = 0; i < 4; i++) {
+        if(*(bands[i].processed_data)) {
+            free(*(bands[i].processed_data));
+        } else if(*(bands[i].raw_data)) {
+            free(*(bands[i].raw_data));
+        }
+        *(bands[i].raw_data) = NULL;
+        *(bands[i].processed_data) = NULL;
+    }
 
-    if (GTK_IS_WINDOW(parent_gtk_window) && gtk_widget_get_visible(GTK_WIDGET(parent_gtk_window)))
-    {
+    // Wyświetlenie błędu użytkownikowi
+    if (GTK_IS_WINDOW(parent_gtk_window) && gtk_widget_get_visible(GTK_WIDGET(parent_gtk_window))) {
         GtkWidget* processing_error_dialog = gtk_message_dialog_new(parent_gtk_window, GTK_DIALOG_DESTROY_WITH_PARENT,
                                                                     GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
                                                                     "Błąd podczas przetwarzania danych. Sprawdź konsolę.");
@@ -375,7 +329,6 @@ cleanup_processing_error:
         gtk_dialog_run(GTK_DIALOG(processing_error_dialog));
         gtk_widget_destroy(processing_error_dialog);
     }
-    return;
 }
 
 static void on_config_radio_resolution_toggled(GtkToggleButton* togglebutton, gpointer data)
