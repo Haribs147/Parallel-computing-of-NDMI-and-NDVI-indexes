@@ -5,11 +5,8 @@
 #include <sys/time.h>
 #include <gdal.h>
 #include "data_loader.h"
+#include "utils.h"
 
-// ====== UTILITY ======
-const char* detect_band_from_filename(const char* filename);
-char* get_timestamp();
-double get_time_diff(struct timeval start, struct timeval end);
 // ====== WALIDACJA ======
 int validate_filename(const char* filename);
 int validate_gdal_dataset(GDALDatasetH dataset, const char* filename);
@@ -96,36 +93,6 @@ float* LoadBandData(const char* pszFilename, int* pnXSize, int* pnYSize) {
            get_timestamp(), band_name, elapsed_time);
 
     return pafScanline;
-}
-
-const char* detect_band_from_filename(const char* filename) {
-    if (filename == NULL) return "UNKNOWN";
-
-    if (strstr(filename, "B04") || strstr(filename, "_B04_")) return "B04";
-    if (strstr(filename, "B08") || strstr(filename, "_B08_")) return "B08";
-    if (strstr(filename, "B11") || strstr(filename, "_B11_")) return "B11";
-    if (strstr(filename, "SCL") || strstr(filename, "_SCL_")) return "SCL";
-
-    return "UNKNOWN";
-}
-
-char* get_timestamp() {
-    static char timestamp[64];
-    struct timeval tv;
-    struct tm* tm_info;
-
-    gettimeofday(&tv, NULL);
-    tm_info = localtime(&tv.tv_sec);
-
-    snprintf(timestamp, sizeof(timestamp), "%02d:%02d:%02d.%03ld",
-             tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec,
-             tv.tv_usec / 1000);
-
-    return timestamp;
-}
-
-double get_time_diff(struct timeval start, struct timeval end) {
-    return (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1000000.0;
 }
 
 int validate_filename(const char* filename)
