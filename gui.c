@@ -147,6 +147,17 @@ static int load_all_bands_data(BandData bands[4])
     return 0;
 }
 
+static void get_target_resolution_dimensions(const BandData* bands, bool target_resolution_10m,
+                                           int* width_out, int* height_out) {
+    if (target_resolution_10m) {
+        *width_out = *bands[B04].width;
+        *height_out = *bands[B04].height;
+    } else {
+        *width_out = *bands[B11].width;
+        *height_out = *bands[B11].height;
+    }
+}
+
 static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
 {
     GtkWidget* config_window_widget = GTK_WIDGET(user_data);
@@ -181,61 +192,12 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
         goto cleanup_processing_error;
     }
 
-
-    // Określenie docelowej rozdzielczości
-    if (res_10m_selected) {
-        final_processing_width = *bands[B04].width;
-        final_processing_height = *bands[B04].height;
-    } else {
-        final_processing_width = *bands[B11].width;
-        final_processing_height = *bands[B11].height;
-    }
+    get_target_resolution_dimensions(bands, res_10m_selected,
+                                   &final_processing_width, &final_processing_height);
 
     // Resampling pasm do docelowej rozdzielczości
-    for(int i = 0; i < 4; i++) {
-        if(*bands[i].width != final_processing_width || *bands[i].height != final_processing_height) {
-            float* resampled = NULL;
-
-            if(res_10m_selected) {
-                // Upsampling B11 i SCL do 10m
-                if(i == B11) { // B11 - bilinear interpolation
-                    resampled = bilinear_resample_float(*(bands[i].raw_data), *bands[i].width, *bands[i].height,
-                                                        final_processing_width, final_processing_height);
-                    if(!resampled) {
-                        fprintf(stderr, "Błąd upsamplingu %s.\n", bands[i].band_name);
-                        goto cleanup_processing_error;
-                    }
-                } else if(i == SCL) { // SCL - nearest neighbor
-                    resampled = nearest_neighbor_resample_scl(*(bands[i].raw_data), *bands[i].width, *bands[i].height,
-                                                              final_processing_width, final_processing_height);
-                    if(!resampled) {
-                        fprintf(stderr, "Błąd upsamplingu %s.\n", bands[i].band_name);
-                        goto cleanup_processing_error;
-                    }
-                }
-            } else {
-                // Downsampling B04 i B08 do 20m
-                if(i == B04 || i == B08) { // B04 lub B08 - averaging
-                    resampled = average_resample_float(*(bands[i].raw_data), *bands[i].width, *bands[i].height,
-                                                       final_processing_width, final_processing_height);
-                    if(!resampled) {
-                        fprintf(stderr, "Błąd downsamplingu %s.\n", bands[i].band_name);
-                        goto cleanup_processing_error;
-                    }
-                }
-            }
-
-            // Zamiana danych na nowe po resamplingu
-            if(resampled) {
-                if(*(bands[i].processed_data) == *(bands[i].raw_data)) {
-                    free(*(bands[i].raw_data));
-                } else {
-                    free(*(bands[i].processed_data));
-                }
-                *(bands[i].raw_data) = NULL;
-                *(bands[i].processed_data) = resampled;
-            }
-        }
+    if (resample_all_bands_to_target_resolution(bands, 4, res_10m_selected) != 0) {
+        goto cleanup_processing_error;
     }
 
     // Obliczanie wskaźników NDVI i NDMI
