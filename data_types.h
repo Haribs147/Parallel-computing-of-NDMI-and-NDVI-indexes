@@ -9,7 +9,6 @@ typedef struct
     int* width;
     int* height;
     const char* band_name;
-    int band_index;
 } BandData;
 
 enum BandType
