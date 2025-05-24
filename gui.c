@@ -57,43 +57,29 @@ static GtkWidget* the_config_window = NULL;
 
 static void free_index_map_data(gpointer data)
 {
-    g_print("== free_index_map_data (WYWOŁANIE MANUALNE): Rozpoczęto zwalnianie danych mapy ==\n");
+    g_print("[%s] Rozpoczęto zwalnianie danych mapy.\n", get_timestamp());
     if (data == NULL)
     {
-        g_print("free_index_map_data: Wskaźnik 'data' jest NULL, kończenie.\n");
+        g_print("[%s] Mapa nie zawiera danych, kończenie.\n", get_timestamp());
         return;
     }
-    IndexMapData* map_data = (IndexMapData*)data;
-    g_print("free_index_map_data: Wskaźnik map_data: %p\n", (void*)map_data);
+
+    IndexMapData* map_data = data;
 
     if (map_data->ndvi_data)
     {
-        g_print("free_index_map_data: Zwalnianie ndvi_data (wskaźnik: %p)...\n", (void*)map_data->ndvi_data);
         free(map_data->ndvi_data);
         map_data->ndvi_data = NULL;
-        g_print("free_index_map_data: Zwolniono ndvi_data.\n");
-    }
-    else
-    {
-        g_print("free_index_map_data: ndvi_data był NULL.\n");
     }
 
     if (map_data->ndmi_data)
     {
-        g_print("free_index_map_data: Zwalnianie ndmi_data (wskaźnik: %p)...\n", (void*)map_data->ndmi_data);
         free(map_data->ndmi_data);
         map_data->ndmi_data = NULL;
-        g_print("free_index_map_data: Zwolniono ndmi_data.\n");
-    }
-    else
-    {
-        g_print("free_index_map_data: ndmi_data był NULL.\n");
     }
 
-    g_print("free_index_map_data: Zwalnianie struktury map_data (wskaźnik: %p) za pomocą g_free()...\n",
-            (void*)map_data);
     g_free(map_data);
-    g_print("== free_index_map_data: Zakończono zwalnianie danych mapy dla wskaźnika %p ==\n", data);
+    g_print("[%s] Zakończono zwalnianie danych mapy.\n", get_timestamp());
 }
 
 // Funkcje obsługi zdarzeń dla przycisków ładowania
@@ -323,12 +309,10 @@ static void on_map_type_radio_toggled(GtkToggleButton* togglebutton, gpointer us
 
 static gboolean on_map_window_delete_event_manual_cleanup(GtkWidget* widget, GdkEvent* event, gpointer user_data)
 {
-    g_print("== on_map_window_delete_event_manual_cleanup: Rozpoczęto obsługę zamknięcia okna mapy przez 'x' ==\n");
     MapWindowCloseAndCleanupData* cleanup_data = (MapWindowCloseAndCleanupData*)user_data;
 
     if (!cleanup_data)
     {
-        g_warning("on_map_window_delete_event_manual_cleanup: cleanup_data jest NULL!");
         return TRUE;
     }
 
