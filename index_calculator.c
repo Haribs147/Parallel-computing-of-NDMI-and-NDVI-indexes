@@ -4,6 +4,8 @@
 #include <math.h>   // Dla fabsf
 #include <float.h>  // Dla FLT_EPSILON
 
+#include "utils.h"
+
 // Wartości SCL, które oznaczają piksele do wykluczenia z obliczeń wskaźników
 // 0=NO_DATA, 1=SATURATED_DEFECTIVE, 3=CLOUD_SHADOW, 6=WATER,
 // 8=CLOUD_MEDIUM_PROBABILITY, 9=CLOUD_HIGH_PROBABILITY, 10=THIN_CIRRUS, 11=SNOW_ICE
@@ -24,6 +26,11 @@ static gboolean is_scl_pixel_masked(float scl_value) {
 float* calculate_ndvi(const float* nir_band, const float* red_band,
                       int width, int height,
                       const float* scl_band) {
+    struct timeval start_time, end_time;
+    double elapsed_time;
+    gettimeofday(&start_time, NULL);
+    g_print("[%s] Rozpoczynanie obliczania NDVI.\n", get_timestamp());
+
     if (!nir_band || !red_band || !scl_band || width <= 0 || height <= 0) {
         fprintf(stderr, "Error: Invalid input parameters for calculate_ndvi.\n");
         return NULL;
@@ -56,12 +63,22 @@ float* calculate_ndvi(const float* nir_band, const float* red_band,
             ndvi_data[i] = ndvi_val;
         }
     }
+
+    gettimeofday(&end_time, NULL);
+    elapsed_time = get_time_diff(start_time, end_time);
+    g_print("[%s] Zakończono obliczanie NDVI (czas: %.2fs)\n", get_timestamp(), elapsed_time);
+
     return ndvi_data;
 }
 
 float* calculate_ndmi(const float* nir_band, const float* swir1_band,
                       int width, int height,
                       const float* scl_band) {
+    struct timeval start_time, end_time;
+    double elapsed_time;
+    gettimeofday(&start_time, NULL);
+    g_print("[%s] Rozpoczynanie obliczania NDMI.\n", get_timestamp());
+
     if (!nir_band || !swir1_band || !scl_band || width <= 0 || height <= 0) {
         fprintf(stderr, "Error: Invalid input parameters for calculate_ndmi.\n");
         return NULL;
@@ -94,5 +111,10 @@ float* calculate_ndmi(const float* nir_band, const float* swir1_band,
             ndmi_data[i] = ndmi_val;
         }
     }
+
+    gettimeofday(&end_time, NULL);
+    elapsed_time = get_time_diff(start_time, end_time);
+    g_print("[%s] Zakończono obliczanie NDMI (czas: %.2fs)\n", get_timestamp(), elapsed_time);
+
     return ndmi_data;
 }
