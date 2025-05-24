@@ -117,3 +117,18 @@ gboolean destroy_widget_idle(gpointer data) {
     g_object_unref(widget_to_destroy); // Zwolnij referencję dodaną dla g_idle_add
     return G_SOURCE_REMOVE; // Usuń źródło bezczynności po wykonaniu
 }
+
+void show_error_dialog(GtkWindow* parent_window, const char* message)
+{
+    if (GTK_IS_WINDOW(parent_window) && gtk_widget_get_visible(GTK_WIDGET(parent_window)))
+    {
+        GtkWidget* error_dialog = gtk_message_dialog_new(parent_window,
+                                                         GTK_DIALOG_DESTROY_WITH_PARENT,
+                                                         GTK_MESSAGE_ERROR,
+                                                         GTK_BUTTONS_CLOSE,
+                                                         "%s", message);
+        gtk_window_set_title(GTK_WINDOW(error_dialog), "Błąd przetwarzania");
+        gtk_dialog_run(GTK_DIALOG(error_dialog));
+        gtk_widget_destroy(error_dialog);
+    }
+}

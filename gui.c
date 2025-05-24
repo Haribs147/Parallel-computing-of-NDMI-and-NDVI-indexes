@@ -76,9 +76,6 @@ static void free_index_map_data(gpointer data);
 static void free_band_data(BandData bands[4]);
 static void map_window_data_destroy(gpointer data);
 
-// ====== POMOCNICZE ======
-static void show_error_dialog(GtkWindow* parent_window, const char* message);
-
 // ====== IMPLEMENTACJE - GUI GŁÓWNE ======
 
 static void activate_config_window(GtkApplication* app)
@@ -599,21 +596,4 @@ static void map_window_data_destroy(gpointer data)
 
     g_free(window_data);
     g_print("[%s] map_window_data_destroy: Cleanup zakończony.\n", get_timestamp());
-}
-
-// ====== IMPLEMENTACJE - POMOCNICZE ======
-
-static void show_error_dialog(GtkWindow* parent_window, const char* message)
-{
-    if (GTK_IS_WINDOW(parent_window) && gtk_widget_get_visible(GTK_WIDGET(parent_window)))
-    {
-        GtkWidget* error_dialog = gtk_message_dialog_new(parent_window,
-                                                         GTK_DIALOG_DESTROY_WITH_PARENT,
-                                                         GTK_MESSAGE_ERROR,
-                                                         GTK_BUTTONS_CLOSE,
-                                                         "%s", message);
-        gtk_window_set_title(GTK_WINDOW(error_dialog), "Błąd przetwarzania");
-        gtk_dialog_run(GTK_DIALOG(error_dialog));
-        gtk_widget_destroy(error_dialog);
-    }
 }

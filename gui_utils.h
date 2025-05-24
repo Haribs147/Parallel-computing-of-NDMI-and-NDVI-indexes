@@ -45,6 +45,7 @@ void update_file_selection(char** target_path_variable, GtkButton* button_to_upd
                           GtkFileChooser* file_chooser, const BandConfig* config);
 void handle_file_selection(GtkWindow* parent_window, const gchar* dialog_title_suffix,
                           char** target_path_variable, GtkButton* button_to_update);
+void show_error_dialog(GtkWindow* parent_window, const char* message);
 
 // Funkcja pomocnicza do odroczonego niszczenia widgetu
 gboolean destroy_widget_idle(gpointer data);
