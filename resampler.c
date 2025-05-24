@@ -116,6 +116,24 @@ float* allocate_output_band(size_t num_pixels)
     return output_band;
 }
 
+/**
+ * @brief Przygotowuje zaalokowany bufor dla danych wyjściowych po resamplingu
+ *
+ * Funkcja waliduje parametry wejściowe i wyjściowe, sprawdza poprawność wymiarów,
+ * oblicza wymaganą ilość pamięci i alokuje bufor dla danych po resamplingu.
+ *
+ * @param input_band Wskaźnik do danych wejściowych pasma (tablica float)
+ * @param input_width Szerokość danych wejściowych w pikselach
+ * @param input_height Wysokość danych wejściowych w pikselach
+ * @param output_width Docelowa szerokość po resamplingu w pikselach
+ * @param output_height Docelowa wysokość po resamplingu w pikselach
+ * @param error_suffix Komunikat błędu do wyświetlenia w przypadku niepowodzenia
+ *
+ * @return Wskaźnik do zaalokowanego bufora float o rozmiarze output_width × output_height,
+ *         lub NULL w przypadku błędu walidacji lub alokacji pamięci
+ *
+ * @note W przypadku błędu wypisuje error_suffix na stderr
+ */
 float* prepare_data(
     const float* input_band,
     int input_width,
