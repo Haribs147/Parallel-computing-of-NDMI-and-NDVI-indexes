@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <float.h>
 #include <string.h>
 
 #include "gui.h"
@@ -16,7 +15,6 @@
 
 #define DEFAULT_WINDOW_WIDTH 900
 #define DEFAULT_WINDOW_HEIGHT 750
-
 
 typedef struct
 {
@@ -33,12 +31,6 @@ typedef struct
     IndexMapData* map_data;
 } MapWindowData;
 
-// Deklaracje wprzód
-static void activate_config_window(GtkApplication* app);
-static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr);
-static void on_config_window_destroy(GtkWidget* widget);
-static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data);
-
 // Zmienne globalne
 static char* path_b04 = NULL;
 static char* path_b08 = NULL;
@@ -54,309 +46,114 @@ static GtkWidget* btn_load_scl_widget = NULL;
 // Statyczny wskaźnik do okna konfiguracji
 static GtkWidget* the_config_window = NULL;
 
-static void free_index_map_data(gpointer data)
-{
-    g_print("[%s] Rozpoczęto zwalnianie danych mapy.\n", get_timestamp());
-    if (data == NULL)
-    {
-        g_print("[%s] Mapa nie zawiera danych, kończenie.\n", get_timestamp());
-        return;
-    }
+// ====== GUI - GŁÓWNE FUNKCJE ======
+static void activate_config_window(GtkApplication* app);
+static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data);
+static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr);
 
-    IndexMapData* map_data = data;
+// ====== GUI - OBSŁUGA ZDARZEŃ ======
+static void on_config_window_destroy(GtkWidget* widget);
+static void on_load_b04_clicked(GtkWidget* widget, gpointer data);
+static void on_load_b08_clicked(GtkWidget* widget, gpointer data);
+static void on_load_b11_clicked(GtkWidget* widget, gpointer data);
+static void on_load_scl_clicked(GtkWidget* widget, gpointer data);
+static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data);
+static void on_config_radio_resolution_toggled(GtkToggleButton* togglebutton);
+static void on_map_type_radio_toggled(GtkToggleButton* togglebutton, gpointer user_data);
 
-    if (map_data->ndvi_data)
-    {
-        free(map_data->ndvi_data);
-        map_data->ndvi_data = NULL;
-    }
+// ====== WALIDACJA ======
+static int validate_band_paths(BandData bands[], int band_count, GtkWindow* parent_window);
 
-    if (map_data->ndmi_data)
-    {
-        free(map_data->ndmi_data);
-        map_data->ndmi_data = NULL;
-    }
-
-    g_free(map_data);
-    g_print("[%s] Zakończono zwalnianie danych mapy.\n", get_timestamp());
-}
-
-// Funkcje obsługi zdarzeń dla przycisków ładowania
-static void on_load_b04_clicked(GtkWidget* widget, gpointer data)
-{
-    handle_file_selection(GTK_WINDOW(data), "pasma B04", &path_b04, GTK_BUTTON(widget));
-}
-
-static void on_load_b08_clicked(GtkWidget* widget, gpointer data)
-{
-    handle_file_selection(GTK_WINDOW(data), "pasma B08", &path_b08, GTK_BUTTON(widget));
-}
-
-static void on_load_b11_clicked(GtkWidget* widget, gpointer data)
-{
-    handle_file_selection(GTK_WINDOW(data), "pasma B11", &path_b11, GTK_BUTTON(widget));
-}
-
-static void on_load_scl_clicked(GtkWidget* widget, gpointer data)
-{
-    handle_file_selection(GTK_WINDOW(data), "pasma SCL", &path_scl, GTK_BUTTON(widget));
-}
-
-static int validate_band_paths(BandData bands[], int band_count, GtkWindow* parent_window)
-{
-    for (int i = 0; i < band_count; i++)
-    {
-        if (!*(bands[i].path))
-        {
-            GtkWidget* error_dialog = gtk_message_dialog_new(parent_window, GTK_DIALOG_DESTROY_WITH_PARENT,
-                                                             GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
-                                                             "Błąd: Nie wszystkie pasma zostały wybrane!\n\nProszę wybrać pliki dla pasm B04, B08, B11 oraz SCL.");
-            gtk_window_set_title(GTK_WINDOW(error_dialog), "Błąd wyboru plików");
-            gtk_dialog_run(GTK_DIALOG(error_dialog));
-            gtk_widget_destroy(error_dialog);
-            return 0;
-        }
-    }
-    return 1;
-}
-
-static int load_all_bands_data(BandData bands[4])
-{
-    // Wczytywanie danych dla wszystkich pasm
-    for (int i = 0; i < 4; i++)
-    {
-        *(bands[i].raw_data) = LoadBandData(*(bands[i].path), bands[i].width, bands[i].height);
-        if (!*(bands[i].raw_data))
-        {
-            fprintf(stderr, "Błąd wczytywania %s!\n", bands[i].band_name);
-            return -1;
-        }
-        *(bands[i].processed_data) = *(bands[i].raw_data);
-    }
-    return 0;
-}
-
+// ====== PRZETWARZANIE DANYCH ======
+static int load_all_bands_data(BandData bands[4]);
 static void get_target_resolution_dimensions(const BandData* bands, bool target_resolution_10m,
-                                             int* width_out, int* height_out)
-{
-    if (target_resolution_10m)
-    {
-        *width_out = *bands[B04].width;
-        *height_out = *bands[B04].height;
-    }
-    else
-    {
-        *width_out = *bands[B11].width;
-        *height_out = *bands[B11].height;
-    }
-}
-
-static void free_band_data(BandData bands[4])
-{
-    for (int i = 0; i < 4; i++)
-    {
-        if (*(bands[i].processed_data))
-        {
-            free(*(bands[i].processed_data));
-        }
-        else if (*(bands[i].raw_data))
-        {
-            free(*(bands[i].raw_data));
-        }
-        *(bands[i].raw_data) = NULL;
-        *(bands[i].processed_data) = NULL;
-    }
-}
-
-// Zwraca 0 dla sukcesu i -1 dla błędu
+                                             int* width_out, int* height_out);
 static int process_bands_and_calculate_indices(BandData bands[4], bool res_10m_selected,
-                                               IndexMapData** out_map_data)
+                                               IndexMapData** out_map_data);
+
+// ====== PAMIĘĆ ======
+static void free_index_map_data(gpointer data);
+static void free_band_data(BandData bands[4]);
+static void map_window_data_destroy(gpointer data);
+
+// ====== POMOCNICZE ======
+static void show_error_dialog(GtkWindow* parent_window, const char* message);
+
+// ====== IMPLEMENTACJE - GUI GŁÓWNE ======
+
+static void activate_config_window(GtkApplication* app)
 {
-    float* ndvi_result = NULL;
-    float* ndmi_result = NULL;
-    IndexMapData* map_display_data = NULL;
-    int final_processing_width, final_processing_height;
-
-    // Load all bands data
-    if (load_all_bands_data(bands) != 0)
+    if (the_config_window)
     {
-        return -1;
-    }
-
-    // Get target resolution dimensions
-    get_target_resolution_dimensions(bands, res_10m_selected,
-                                     &final_processing_width, &final_processing_height);
-
-    // Resample bands to target resolution
-    if (resample_all_bands_to_target_resolution(bands, 4, res_10m_selected) != 0)
-    {
-        free_band_data(bands);
-        return -1;
-    }
-
-    // Calculate NDVI
-    ndvi_result = calculate_ndvi(*bands[B08].processed_data, *bands[B04].processed_data,
-                                 final_processing_width, final_processing_height,
-                                 *bands[SCL].processed_data);
-    if (!ndvi_result)
-    {
-        g_printerr("[%s] Błąd podczas obliczania NDVI.\n", get_timestamp());
-        free_band_data(bands);
-        return -1;
-    }
-
-    // Calculate NDMI
-    ndmi_result = calculate_ndmi(*bands[B08].processed_data, *bands[B11].processed_data,
-                                 final_processing_width, final_processing_height,
-                                 *bands[SCL].processed_data);
-    if (!ndmi_result)
-    {
-        g_printerr("[%s] Błąd podczas obliczania NDMI.\n", get_timestamp());
-        free(ndvi_result);
-        free_band_data(bands);
-        return -1;
-    }
-
-    // Free processed band data as we no longer need it
-    free_band_data(bands);
-
-    // Prepare display data
-    map_display_data = g_new(IndexMapData, 1);
-    if (!map_display_data)
-    {
-        g_printerr("[%s] Błąd alokacji pamięci dla IndexMapData.\n", get_timestamp());
-        free(ndvi_result);
-        free(ndmi_result);
-        return -1;
-    }
-
-    map_display_data->ndvi_data = ndvi_result;
-    map_display_data->ndmi_data = ndmi_result;
-    map_display_data->width = final_processing_width;
-    map_display_data->height = final_processing_height;
-    strcpy(map_display_data->current_map_type, "NDVI");
-
-    *out_map_data = map_display_data;
-    return 0;
-}
-
-static void show_error_dialog(GtkWindow* parent_window, const char* message)
-{
-    if (GTK_IS_WINDOW(parent_window) && gtk_widget_get_visible(GTK_WIDGET(parent_window)))
-    {
-        GtkWidget* error_dialog = gtk_message_dialog_new(parent_window,
-                                                         GTK_DIALOG_DESTROY_WITH_PARENT,
-                                                         GTK_MESSAGE_ERROR,
-                                                         GTK_BUTTONS_CLOSE,
-                                                         "%s", message);
-        gtk_window_set_title(GTK_WINDOW(error_dialog), "Błąd przetwarzania");
-        gtk_dialog_run(GTK_DIALOG(error_dialog));
-        gtk_widget_destroy(error_dialog);
-    }
-}
-
-static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
-{
-    GtkWidget* config_window_widget = GTK_WIDGET(user_data);
-    GtkWindow* parent_gtk_window = GTK_WINDOW(user_data);
-
-    int widths[4], heights[4];
-    float* raw_data[4] = {NULL};
-    float* processed_data[4] = {NULL};
-
-    BandData bands[4] = {
-        {&path_b04, &btn_load_b04_widget, &raw_data[0], &processed_data[0], &widths[0], &heights[0], "B04", 0},
-        {&path_b08, &btn_load_b08_widget, &raw_data[1], &processed_data[1], &widths[1], &heights[1], "B08", 1},
-        {&path_b11, &btn_load_b11_widget, &raw_data[2], &processed_data[2], &widths[2], &heights[2], "B11", 2},
-        {&path_scl, &btn_load_scl_widget, &raw_data[3], &processed_data[3], &widths[3], &heights[3], "SCL", 3}
-    };
-
-    if (!validate_band_paths(bands, 4, parent_gtk_window))
-    {
-        return;
-    }
-
-    g_print("[%s] Rozpoczynanie wczytywania danych pasm.\n", get_timestamp());
-
-    IndexMapData* map_display_data = NULL;
-    int processing_result = process_bands_and_calculate_indices(bands, res_10m_selected, &map_display_data);
-
-    if (processing_result != 0)
-    {
-        g_printerr("[%s] Wystąpił błąd podczas przetwarzania danych.\n", get_timestamp());
-        show_error_dialog(parent_gtk_window, "Błąd podczas przetwarzania danych. Sprawdź konsolę.");
-        return;
-    }
-
-    GtkApplication* app = gtk_window_get_application(GTK_WINDOW(config_window_widget));
-    GtkWidget* map_window = create_map_window(app, map_display_data);
-
-    if (map_window)
-    {
-        gtk_widget_show_all(map_window);
-        gtk_widget_destroy(config_window_widget);
-    }
-    else
-    {
-        show_error_dialog(parent_gtk_window, "Błąd podczas tworzenia okna mapy.");
-    }
-}
-
-static void on_config_radio_resolution_toggled(GtkToggleButton* togglebutton)
-{
-    if (gtk_toggle_button_get_active(togglebutton))
-    {
-        const gchar* label = gtk_button_get_label(GTK_BUTTON(togglebutton));
-        res_10m_selected = g_str_has_prefix(label, "upscaling") ? TRUE : FALSE;
-    }
-}
-
-static void on_map_type_radio_toggled(GtkToggleButton* togglebutton, gpointer user_data)
-{
-    if (gtk_toggle_button_get_active(togglebutton))
-    {
-        GtkWidget* drawing_area = GTK_WIDGET(user_data);
-        IndexMapData* map_data = g_object_get_data(G_OBJECT(drawing_area), "map_data_ptr");
-        const gchar* label = gtk_button_get_label(GTK_BUTTON(togglebutton));
-
-        if (g_strcmp0(label, "NDVI") == 0)
+        if (gtk_widget_get_visible(the_config_window))
         {
-            strcpy(map_data->current_map_type, "NDVI");
+            gtk_window_present(GTK_WINDOW(the_config_window));
         }
         else
         {
-            strcpy(map_data->current_map_type, "NDMI");
+            gtk_widget_show_all(the_config_window);
+            gtk_window_present(GTK_WINDOW(the_config_window));
         }
-
-        if (GTK_IS_WIDGET(drawing_area) && gtk_widget_get_realized(drawing_area) &&
-            gtk_widget_get_visible(drawing_area))
-        {
-            gtk_widget_queue_draw(drawing_area);
-        }
-    }
-}
-
-// === Funkcja cleanup (automatycznie wywoływana) ===
-static void map_window_data_destroy(gpointer data)
-{
-    g_print("[%s] map_window_data_destroy: Rozpoczynanie cleanup.\n", get_timestamp());
-
-    MapWindowData* window_data = (MapWindowData*)data;
-    if (!window_data)
-    {
-        g_print("[%s] window_data jest NULL, pomijam cleanup.\n", get_timestamp());
         return;
     }
 
-    if (window_data->map_data)
-    {
-        g_print("[%s] Zwalnianie map_data: %p\n", get_timestamp(), (void*)window_data->map_data);
-        free_index_map_data(window_data->map_data);
-        window_data->map_data = NULL;
-    }
+    GtkWidget* config_window_local;
+    GtkWidget* main_vbox;
+    GtkWidget* radio_hbox_config;
+    GtkWidget* load_buttons_hbox;
+    GtkWidget *radio_10m, *radio_20m;
+    GtkWidget* btn_rozpocznij;
 
-    g_free(window_data);
-    g_print("[%s] map_window_data_destroy: Cleanup zakończony.\n", get_timestamp());
+    config_window_local = gtk_application_window_new(app);
+    gtk_window_set_title(GTK_WINDOW(config_window_local), "Konfiguracja Analizy");
+    gtk_window_set_default_size(GTK_WINDOW(config_window_local), DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
+    gtk_container_set_border_width(GTK_CONTAINER(config_window_local), 10);
+
+    the_config_window = config_window_local;
+    g_signal_connect(the_config_window, "destroy", G_CALLBACK(on_config_window_destroy), NULL);
+
+    main_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(config_window_local), main_vbox);
+
+    radio_hbox_config = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_widget_set_halign(radio_hbox_config, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(main_vbox), radio_hbox_config, FALSE, FALSE, 0);
+
+    radio_10m = gtk_radio_button_new_with_label(NULL, "upscaling do 10m");
+    g_signal_connect(radio_10m, "toggled", G_CALLBACK(on_config_radio_resolution_toggled), NULL);
+    gtk_box_pack_start(GTK_BOX(radio_hbox_config), radio_10m, FALSE, FALSE, 0);
+
+    radio_20m = gtk_radio_button_new_with_label_from_widget(GTK_RADIO_BUTTON(radio_10m), "downscaling do 20m");
+    g_signal_connect(radio_20m, "toggled", G_CALLBACK(on_config_radio_resolution_toggled), NULL);
+    gtk_box_pack_start(GTK_BOX(radio_hbox_config), radio_20m, FALSE, FALSE, 0);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio_10m), TRUE);
+
+    load_buttons_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_set_homogeneous(GTK_BOX(load_buttons_hbox), TRUE);
+    gtk_box_pack_start(GTK_BOX(main_vbox), load_buttons_hbox, FALSE, FALSE, 0);
+
+    btn_load_b04_widget = create_button_with_ellipsis("Wczytaj pasmo B04");
+    g_signal_connect(btn_load_b04_widget, "clicked", G_CALLBACK(on_load_b04_clicked), config_window_local);
+    gtk_box_pack_start(GTK_BOX(load_buttons_hbox), btn_load_b04_widget, TRUE, TRUE, 0);
+
+    btn_load_b08_widget = create_button_with_ellipsis("Wczytaj pasmo B08");
+    g_signal_connect(btn_load_b08_widget, "clicked", G_CALLBACK(on_load_b08_clicked), config_window_local);
+    gtk_box_pack_start(GTK_BOX(load_buttons_hbox), btn_load_b08_widget, TRUE, TRUE, 0);
+
+    btn_load_b11_widget = create_button_with_ellipsis("Wczytaj pasmo B11");
+    g_signal_connect(btn_load_b11_widget, "clicked", G_CALLBACK(on_load_b11_clicked), config_window_local);
+    gtk_box_pack_start(GTK_BOX(load_buttons_hbox), btn_load_b11_widget, TRUE, TRUE, 0);
+
+    btn_load_scl_widget = create_button_with_ellipsis("Wczytaj pasmo SCL");
+    g_signal_connect(btn_load_scl_widget, "clicked", G_CALLBACK(on_load_scl_clicked), config_window_local);
+    gtk_box_pack_start(GTK_BOX(load_buttons_hbox), btn_load_scl_widget, TRUE, TRUE, 0);
+
+    btn_rozpocznij = gtk_button_new_with_label("Rozpocznij");
+    g_signal_connect(btn_rozpocznij, "clicked", G_CALLBACK(on_rozpocznij_clicked), config_window_local);
+    gtk_box_pack_start(GTK_BOX(main_vbox), btn_rozpocznij, FALSE, FALSE, 0);
+    gtk_widget_set_halign(btn_rozpocznij, GTK_ALIGN_START);
+
+    gtk_widget_show_all(config_window_local);
 }
 
 static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data)
@@ -440,91 +237,6 @@ static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data)
     return map_window;
 }
 
-
-// Handler dla zniszczenia okna konfiguracji
-static void on_config_window_destroy(GtkWidget* widget)
-{
-    if (the_config_window == widget)
-    {
-        the_config_window = NULL;
-    }
-}
-
-static void activate_config_window(GtkApplication* app)
-{
-    if (the_config_window)
-    {
-        if (gtk_widget_get_visible(the_config_window))
-        {
-            gtk_window_present(GTK_WINDOW(the_config_window));
-        }
-        else
-        {
-            gtk_widget_show_all(the_config_window);
-            gtk_window_present(GTK_WINDOW(the_config_window));
-        }
-        return;
-    }
-
-    GtkWidget* config_window_local;
-    GtkWidget* main_vbox;
-    GtkWidget* radio_hbox_config;
-    GtkWidget* load_buttons_hbox;
-    GtkWidget *radio_10m, *radio_20m;
-    GtkWidget* btn_rozpocznij;
-
-    config_window_local = gtk_application_window_new(app);
-    gtk_window_set_title(GTK_WINDOW(config_window_local), "Konfiguracja Analizy");
-    gtk_window_set_default_size(GTK_WINDOW(config_window_local), DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
-    gtk_container_set_border_width(GTK_CONTAINER(config_window_local), 10);
-
-    the_config_window = config_window_local;
-    g_signal_connect(the_config_window, "destroy", G_CALLBACK(on_config_window_destroy), NULL);
-
-    main_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_container_add(GTK_CONTAINER(config_window_local), main_vbox);
-
-    radio_hbox_config = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-    gtk_widget_set_halign(radio_hbox_config, GTK_ALIGN_START);
-    gtk_box_pack_start(GTK_BOX(main_vbox), radio_hbox_config, FALSE, FALSE, 0);
-
-    radio_10m = gtk_radio_button_new_with_label(NULL, "upscaling do 10m");
-    g_signal_connect(radio_10m, "toggled", G_CALLBACK(on_config_radio_resolution_toggled), NULL);
-    gtk_box_pack_start(GTK_BOX(radio_hbox_config), radio_10m, FALSE, FALSE, 0);
-
-    radio_20m = gtk_radio_button_new_with_label_from_widget(GTK_RADIO_BUTTON(radio_10m), "downscaling do 20m");
-    g_signal_connect(radio_20m, "toggled", G_CALLBACK(on_config_radio_resolution_toggled), NULL);
-    gtk_box_pack_start(GTK_BOX(radio_hbox_config), radio_20m, FALSE, FALSE, 0);
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio_10m), TRUE);
-
-    load_buttons_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-    gtk_box_set_homogeneous(GTK_BOX(load_buttons_hbox), TRUE);
-    gtk_box_pack_start(GTK_BOX(main_vbox), load_buttons_hbox, FALSE, FALSE, 0);
-
-    btn_load_b04_widget = create_button_with_ellipsis("Wczytaj pasmo B04");
-    g_signal_connect(btn_load_b04_widget, "clicked", G_CALLBACK(on_load_b04_clicked), config_window_local);
-    gtk_box_pack_start(GTK_BOX(load_buttons_hbox), btn_load_b04_widget, TRUE, TRUE, 0);
-
-    btn_load_b08_widget = create_button_with_ellipsis("Wczytaj pasmo B08");
-    g_signal_connect(btn_load_b08_widget, "clicked", G_CALLBACK(on_load_b08_clicked), config_window_local);
-    gtk_box_pack_start(GTK_BOX(load_buttons_hbox), btn_load_b08_widget, TRUE, TRUE, 0);
-
-    btn_load_b11_widget = create_button_with_ellipsis("Wczytaj pasmo B11");
-    g_signal_connect(btn_load_b11_widget, "clicked", G_CALLBACK(on_load_b11_clicked), config_window_local);
-    gtk_box_pack_start(GTK_BOX(load_buttons_hbox), btn_load_b11_widget, TRUE, TRUE, 0);
-
-    btn_load_scl_widget = create_button_with_ellipsis("Wczytaj pasmo SCL");
-    g_signal_connect(btn_load_scl_widget, "clicked", G_CALLBACK(on_load_scl_clicked), config_window_local);
-    gtk_box_pack_start(GTK_BOX(load_buttons_hbox), btn_load_scl_widget, TRUE, TRUE, 0);
-
-    btn_rozpocznij = gtk_button_new_with_label("Rozpocznij");
-    g_signal_connect(btn_rozpocznij, "clicked", G_CALLBACK(on_rozpocznij_clicked), config_window_local);
-    gtk_box_pack_start(GTK_BOX(main_vbox), btn_rozpocznij, FALSE, FALSE, 0);
-    gtk_widget_set_halign(btn_rozpocznij, GTK_ALIGN_START);
-
-    gtk_widget_show_all(config_window_local);
-}
-
 static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr)
 {
     IndexMapData* map_data = g_object_get_data(G_OBJECT(widget), "map_data_ptr");
@@ -584,4 +296,324 @@ int run_gui(int argc, char* argv[])
 
     g_print("Aplikacja zakończona, status: %d\n", status);
     return status;
+}
+
+// ====== IMPLEMENTACJE - OBSŁUGA ZDARZEŃ ======
+
+static void on_config_window_destroy(GtkWidget* widget)
+{
+    if (the_config_window == widget)
+    {
+        the_config_window = NULL;
+    }
+}
+
+static void on_load_b04_clicked(GtkWidget* widget, gpointer data)
+{
+    handle_file_selection(GTK_WINDOW(data), "pasma B04", &path_b04, GTK_BUTTON(widget));
+}
+
+static void on_load_b08_clicked(GtkWidget* widget, gpointer data)
+{
+    handle_file_selection(GTK_WINDOW(data), "pasma B08", &path_b08, GTK_BUTTON(widget));
+}
+
+static void on_load_b11_clicked(GtkWidget* widget, gpointer data)
+{
+    handle_file_selection(GTK_WINDOW(data), "pasma B11", &path_b11, GTK_BUTTON(widget));
+}
+
+static void on_load_scl_clicked(GtkWidget* widget, gpointer data)
+{
+    handle_file_selection(GTK_WINDOW(data), "pasma SCL", &path_scl, GTK_BUTTON(widget));
+}
+
+static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
+{
+    GtkWidget* config_window_widget = GTK_WIDGET(user_data);
+    GtkWindow* parent_gtk_window = GTK_WINDOW(user_data);
+
+    int widths[4], heights[4];
+    float* raw_data[4] = {NULL};
+    float* processed_data[4] = {NULL};
+
+    BandData bands[4] = {
+        {&path_b04, &btn_load_b04_widget, &raw_data[0], &processed_data[0], &widths[0], &heights[0], "B04", 0},
+        {&path_b08, &btn_load_b08_widget, &raw_data[1], &processed_data[1], &widths[1], &heights[1], "B08", 1},
+        {&path_b11, &btn_load_b11_widget, &raw_data[2], &processed_data[2], &widths[2], &heights[2], "B11", 2},
+        {&path_scl, &btn_load_scl_widget, &raw_data[3], &processed_data[3], &widths[3], &heights[3], "SCL", 3}
+    };
+
+    if (!validate_band_paths(bands, 4, parent_gtk_window))
+    {
+        return;
+    }
+
+    g_print("[%s] Rozpoczynanie wczytywania danych pasm.\n", get_timestamp());
+
+    IndexMapData* map_display_data = NULL;
+    int processing_result = process_bands_and_calculate_indices(bands, res_10m_selected, &map_display_data);
+
+    if (processing_result != 0)
+    {
+        g_printerr("[%s] Wystąpił błąd podczas przetwarzania danych.\n", get_timestamp());
+        show_error_dialog(parent_gtk_window, "Błąd podczas przetwarzania danych. Sprawdź konsolę.");
+        return;
+    }
+
+    GtkApplication* app = gtk_window_get_application(GTK_WINDOW(config_window_widget));
+    GtkWidget* map_window = create_map_window(app, map_display_data);
+
+    if (map_window)
+    {
+        gtk_widget_show_all(map_window);
+        gtk_widget_destroy(config_window_widget);
+    }
+    else
+    {
+        show_error_dialog(parent_gtk_window, "Błąd podczas tworzenia okna mapy.");
+    }
+}
+
+static void on_config_radio_resolution_toggled(GtkToggleButton* togglebutton)
+{
+    if (gtk_toggle_button_get_active(togglebutton))
+    {
+        const gchar* label = gtk_button_get_label(GTK_BUTTON(togglebutton));
+        res_10m_selected = g_str_has_prefix(label, "upscaling") ? TRUE : FALSE;
+    }
+}
+
+static void on_map_type_radio_toggled(GtkToggleButton* togglebutton, gpointer user_data)
+{
+    if (gtk_toggle_button_get_active(togglebutton))
+    {
+        GtkWidget* drawing_area = GTK_WIDGET(user_data);
+        IndexMapData* map_data = g_object_get_data(G_OBJECT(drawing_area), "map_data_ptr");
+        const gchar* label = gtk_button_get_label(GTK_BUTTON(togglebutton));
+
+        if (g_strcmp0(label, "NDVI") == 0)
+        {
+            strcpy(map_data->current_map_type, "NDVI");
+        }
+        else
+        {
+            strcpy(map_data->current_map_type, "NDMI");
+        }
+
+        if (GTK_IS_WIDGET(drawing_area) && gtk_widget_get_realized(drawing_area) &&
+            gtk_widget_get_visible(drawing_area))
+        {
+            gtk_widget_queue_draw(drawing_area);
+        }
+    }
+}
+
+// ====== IMPLEMENTACJE - WALIDACJA ======
+
+static int validate_band_paths(BandData bands[], int band_count, GtkWindow* parent_window)
+{
+    for (int i = 0; i < band_count; i++)
+    {
+        if (!*(bands[i].path))
+        {
+            GtkWidget* error_dialog = gtk_message_dialog_new(parent_window, GTK_DIALOG_DESTROY_WITH_PARENT,
+                                                             GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
+                                                             "Błąd: Nie wszystkie pasma zostały wybrane!\n\nProszę wybrać pliki dla pasm B04, B08, B11 oraz SCL.");
+            gtk_window_set_title(GTK_WINDOW(error_dialog), "Błąd wyboru plików");
+            gtk_dialog_run(GTK_DIALOG(error_dialog));
+            gtk_widget_destroy(error_dialog);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+// ====== IMPLEMENTACJE - PRZETWARZANIE DANYCH ======
+
+static int load_all_bands_data(BandData bands[4])
+{
+    // Wczytywanie danych dla wszystkich pasm
+    for (int i = 0; i < 4; i++)
+    {
+        *(bands[i].raw_data) = LoadBandData(*(bands[i].path), bands[i].width, bands[i].height);
+        if (!*(bands[i].raw_data))
+        {
+            fprintf(stderr, "Błąd wczytywania %s!\n", bands[i].band_name);
+            return -1;
+        }
+        *(bands[i].processed_data) = *(bands[i].raw_data);
+    }
+    return 0;
+}
+
+static void get_target_resolution_dimensions(const BandData* bands, bool target_resolution_10m,
+                                             int* width_out, int* height_out)
+{
+    if (target_resolution_10m)
+    {
+        *width_out = *bands[B04].width;
+        *height_out = *bands[B04].height;
+    }
+    else
+    {
+        *width_out = *bands[B11].width;
+        *height_out = *bands[B11].height;
+    }
+}
+
+static int process_bands_and_calculate_indices(BandData bands[4], bool res_10m_selected,
+                                               IndexMapData** out_map_data)
+{
+    float* ndvi_result = NULL;
+    float* ndmi_result = NULL;
+    IndexMapData* map_display_data = NULL;
+    int final_processing_width, final_processing_height;
+
+    // Load all bands data
+    if (load_all_bands_data(bands) != 0)
+    {
+        return -1;
+    }
+
+    // Get target resolution dimensions
+    get_target_resolution_dimensions(bands, res_10m_selected,
+                                     &final_processing_width, &final_processing_height);
+
+    // Resample bands to target resolution
+    if (resample_all_bands_to_target_resolution(bands, 4, res_10m_selected) != 0)
+    {
+        free_band_data(bands);
+        return -1;
+    }
+
+    // Calculate NDVI
+    ndvi_result = calculate_ndvi(*bands[B08].processed_data, *bands[B04].processed_data,
+                                 final_processing_width, final_processing_height,
+                                 *bands[SCL].processed_data);
+    if (!ndvi_result)
+    {
+        g_printerr("[%s] Błąd podczas obliczania NDVI.\n", get_timestamp());
+        free_band_data(bands);
+        return -1;
+    }
+
+    // Calculate NDMI
+    ndmi_result = calculate_ndmi(*bands[B08].processed_data, *bands[B11].processed_data,
+                                 final_processing_width, final_processing_height,
+                                 *bands[SCL].processed_data);
+    if (!ndmi_result)
+    {
+        g_printerr("[%s] Błąd podczas obliczania NDMI.\n", get_timestamp());
+        free(ndvi_result);
+        free_band_data(bands);
+        return -1;
+    }
+
+    // Free processed band data as we no longer need it
+    free_band_data(bands);
+
+    // Prepare display data
+    map_display_data = g_new(IndexMapData, 1);
+    if (!map_display_data)
+    {
+        g_printerr("[%s] Błąd alokacji pamięci dla IndexMapData.\n", get_timestamp());
+        free(ndvi_result);
+        free(ndmi_result);
+        return -1;
+    }
+
+    map_display_data->ndvi_data = ndvi_result;
+    map_display_data->ndmi_data = ndmi_result;
+    map_display_data->width = final_processing_width;
+    map_display_data->height = final_processing_height;
+    strcpy(map_display_data->current_map_type, "NDVI");
+
+    *out_map_data = map_display_data;
+    return 0;
+}
+
+// ====== IMPLEMENTACJE - PAMIĘĆ ======
+
+static void free_index_map_data(gpointer data)
+{
+    g_print("[%s] Rozpoczęto zwalnianie danych mapy.\n", get_timestamp());
+    if (data == NULL)
+    {
+        g_print("[%s] Mapa nie zawiera danych, kończenie.\n", get_timestamp());
+        return;
+    }
+
+    IndexMapData* map_data = data;
+
+    if (map_data->ndvi_data)
+    {
+        free(map_data->ndvi_data);
+        map_data->ndvi_data = NULL;
+    }
+
+    if (map_data->ndmi_data)
+    {
+        free(map_data->ndmi_data);
+        map_data->ndmi_data = NULL;
+    }
+
+    g_free(map_data);
+    g_print("[%s] Zakończono zwalnianie danych mapy.\n", get_timestamp());
+}
+
+static void free_band_data(BandData bands[4])
+{
+    for (int i = 0; i < 4; i++)
+    {
+        if (*(bands[i].processed_data))
+        {
+            free(*(bands[i].processed_data));
+        }
+        else if (*(bands[i].raw_data))
+        {
+            free(*(bands[i].raw_data));
+        }
+        *(bands[i].raw_data) = NULL;
+        *(bands[i].processed_data) = NULL;
+    }
+}
+
+static void map_window_data_destroy(gpointer data)
+{
+    g_print("[%s] map_window_data_destroy: Rozpoczynanie cleanup.\n", get_timestamp());
+
+    MapWindowData* window_data = (MapWindowData*)data;
+    if (!window_data)
+    {
+        g_print("[%s] window_data jest NULL, pomijam cleanup.\n", get_timestamp());
+        return;
+    }
+
+    if (window_data->map_data)
+    {
+        g_print("[%s] Zwalnianie map_data: %p\n", get_timestamp(), (void*)window_data->map_data);
+        free_index_map_data(window_data->map_data);
+        window_data->map_data = NULL;
+    }
+
+    g_free(window_data);
+    g_print("[%s] map_window_data_destroy: Cleanup zakończony.\n", get_timestamp());
+}
+
+// ====== IMPLEMENTACJE - POMOCNICZE ======
+
+static void show_error_dialog(GtkWindow* parent_window, const char* message)
+{
+    if (GTK_IS_WINDOW(parent_window) && gtk_widget_get_visible(GTK_WIDGET(parent_window)))
+    {
+        GtkWidget* error_dialog = gtk_message_dialog_new(parent_window,
+                                                         GTK_DIALOG_DESTROY_WITH_PARENT,
+                                                         GTK_MESSAGE_ERROR,
+                                                         GTK_BUTTONS_CLOSE,
+                                                         "%s", message);
+        gtk_window_set_title(GTK_WINDOW(error_dialog), "Błąd przetwarzania");
+        gtk_dialog_run(GTK_DIALOG(error_dialog));
+        gtk_widget_destroy(error_dialog);
+    }
 }
