@@ -27,18 +27,16 @@ typedef struct
     char current_map_type[10];
 } IndexMapData;
 
-typedef struct
-{
+typedef struct {
     GtkApplication* app;
-    IndexMapData* map_data_to_free;
-} MapWindowCloseAndCleanupData;
+    IndexMapData* map_data;
+} MapWindowData;
 
 // Deklaracje wprzód
-static void create_and_show_map_window(GtkApplication* app, gpointer user_data);
 static void activate_config_window(GtkApplication* app, gpointer user_data);
 static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr, gpointer user_data);
-static gboolean on_map_window_delete_event_manual_cleanup(GtkWidget* widget, GdkEvent* event, gpointer user_data);
 static void on_config_window_destroy(GtkWidget* widget, gpointer data);
+static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data);
 
 // Zmienne globalne
 static char* path_b04 = NULL;
@@ -268,10 +266,15 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
         return;
     }
 
-    // Create map window and destroy config window
     GtkApplication* app = gtk_window_get_application(GTK_WINDOW(config_window_widget));
-    create_and_show_map_window(app, map_display_data);
-    gtk_widget_destroy(config_window_widget);
+    GtkWidget* map_window = create_map_window(app, map_display_data);
+
+    if (map_window) {
+        gtk_widget_show_all(map_window);
+        gtk_widget_destroy(config_window_widget);
+    } else {
+        show_error_dialog(parent_gtk_window, "Błąd podczas tworzenia okna mapy.");
+    }
 }
 
 static void on_config_radio_resolution_toggled(GtkToggleButton* togglebutton, gpointer data)
@@ -307,159 +310,103 @@ static void on_map_type_radio_toggled(GtkToggleButton* togglebutton, gpointer us
     }
 }
 
-static gboolean on_map_window_delete_event_manual_cleanup(GtkWidget* widget, GdkEvent* event, gpointer user_data)
+// === Funkcja cleanup (automatycznie wywoływana) ===
+static void map_window_data_destroy(gpointer data)
 {
-    MapWindowCloseAndCleanupData* cleanup_data = (MapWindowCloseAndCleanupData*)user_data;
+    g_print("[%s] map_window_data_destroy: Rozpoczynanie cleanup.\n", get_timestamp());
 
-    if (!cleanup_data)
-    {
-        return TRUE;
+    MapWindowData* window_data = (MapWindowData*)data;
+    if (!window_data) {
+        g_print("[%s] window_data jest NULL, pomijam cleanup.\n", get_timestamp());
+        return;
     }
 
-    // 1. Upewnij się, że drawing_area nie będzie już próbowało używać map_data.
-    GtkWidget* toplevel = gtk_widget_get_toplevel(widget);
-    if (GTK_IS_WINDOW(toplevel))
-    {
-        GtkWidget* main_vbox = gtk_bin_get_child(GTK_BIN(toplevel));
-        if (main_vbox && GTK_IS_BOX(main_vbox))
-        {
-            GList* children = gtk_container_get_children(GTK_CONTAINER(main_vbox));
-            for (GList* iter = children; iter != NULL; iter = g_list_next(iter))
-            {
-                GtkWidget* child_widget = GTK_WIDGET(iter->data);
-                if (GTK_IS_SCROLLED_WINDOW(child_widget))
-                {
-                    GtkWidget* drawing_area_map = gtk_bin_get_child(GTK_BIN(child_widget));
-                    if (drawing_area_map && GTK_IS_DRAWING_AREA(drawing_area_map))
-                    {
-                        g_print("on_map_window_delete_event_manual_cleanup: Usuwanie map_data_ptr z drawing_area %p\n",
-                                (void*)drawing_area_map);
-                        g_object_set_data(G_OBJECT(drawing_area_map), "map_data_ptr", NULL);
-                        break;
-                    }
-                }
-            }
-            g_list_free(children);
-        }
+    if (window_data->map_data) {
+        g_print("[%s] Zwalnianie map_data: %p\n", get_timestamp(), (void*)window_data->map_data);
+        free_index_map_data(window_data->map_data);
+        window_data->map_data = NULL;
     }
 
-    // 2. Zwolnij dane mapy
-    if (cleanup_data->map_data_to_free)
-    {
-        g_print("on_map_window_delete_event_manual_cleanup: Wywoływanie free_index_map_data dla %p.\n",
-                (void*)cleanup_data->map_data_to_free);
-        free_index_map_data(cleanup_data->map_data_to_free);
-        cleanup_data->map_data_to_free = NULL;
-    }
-    else
-    {
-        g_print("on_map_window_delete_event_manual_cleanup: map_data_to_free był już NULL.\n");
-    }
-
-    // 3. Reaktywuj aplikację (aby pokazać okno konfiguracji)
-    if (cleanup_data->app)
-    {
-        g_print("on_map_window_delete_event_manual_cleanup: Ponowna aktywacja aplikacji.\n");
-        g_application_activate(G_APPLICATION(cleanup_data->app));
-    }
-
-    // 4. Odłącz ten handler od sygnału
-    g_print("on_map_window_delete_event_manual_cleanup: Odłączanie handlera od okna %p.\n", (void*)widget);
-    g_signal_handlers_disconnect_by_func(widget,
-                                         on_map_window_delete_event_manual_cleanup,
-                                         cleanup_data);
-
-    // 5. ODROCZONE zniszczenie okna mapy
-    g_print("on_map_window_delete_event_manual_cleanup: Kolejkowanie zniszczenia okna mapy %p przez g_idle_add.\n",
-            (void*)widget);
-    g_object_ref(widget); // Dodaj referencję, bo widget będzie użyty w idle callback
-    g_idle_add(destroy_widget_idle, widget);
-
-    // 6. Zwolnij strukturę MapWindowCloseAndCleanupData
-    g_print("on_map_window_delete_event_manual_cleanup: Zwalnianie struktury cleanup_data %p.\n", (void*)cleanup_data);
-    g_free(cleanup_data);
-
-    g_print("== on_map_window_delete_event_manual_cleanup: Zakończono (zniszczenie okna odroczone). ==\n");
-    return TRUE; // Zdarzenie w pełni obsłużone
+    g_free(window_data);
+    g_print("[%s] map_window_data_destroy: Cleanup zakończony.\n", get_timestamp());
 }
 
-static void create_and_show_map_window(GtkApplication* app, gpointer user_data)
+static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data)
 {
-    IndexMapData* passed_map_data = (IndexMapData*)user_data;
-
-    if (passed_map_data == NULL)
-    {
-        fprintf(stderr, "create_and_show_map_window: Otrzymano NULL jako user_data.\n");
-        return;
-    }
-    if (!passed_map_data->ndvi_data && !passed_map_data->ndmi_data)
-    {
-        fprintf(stderr, "create_and_show_map_window: Krytyczny błąd - dane NDVI lub NDMI w map_data są NULL.\n");
-        free_index_map_data(passed_map_data);
-        return;
+    if (!map_data) {
+        g_printerr("create_map_window_v3: map_data jest NULL.\n");
+        return NULL;
     }
 
-    GtkWidget* map_window;
-    GtkWidget* map_main_vbox;
-    GtkWidget* radio_map_hbox;
-    GtkWidget *radio_ndmi, *radio_ndvi;
-    GtkWidget* scrolled_window_for_map;
-    GtkWidget* drawing_area_map;
+    if (!map_data->ndvi_data && !map_data->ndmi_data) {
+        g_printerr("create_map_window_v3: Brak danych NDVI/NDMI.\n");
+        free_index_map_data(map_data);
+        return NULL;
+    }
 
-    map_window = gtk_application_window_new(app);
+    // Tworzenie okna
+    GtkWidget* map_window = gtk_application_window_new(app);
     gtk_window_set_title(GTK_WINDOW(map_window), "Wynikowa Mapa Wskaźników");
     gtk_window_set_default_size(GTK_WINDOW(map_window), DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
     gtk_container_set_border_width(GTK_CONTAINER(map_window), 10);
 
-    MapWindowCloseAndCleanupData* cleanup_data_for_event = g_new(MapWindowCloseAndCleanupData, 1);
-    cleanup_data_for_event->app = app;
-    cleanup_data_for_event->map_data_to_free = passed_map_data;
+    // Enkapsulacja danych okna z automatycznym cleanup
+    MapWindowData* window_data = g_new(MapWindowData, 1);
+    window_data->app = app;
+    window_data->map_data = map_data;
 
-    g_print("create_and_show_map_window: Podłączanie on_map_window_delete_event_manual_cleanup do 'delete-event'.\n");
-    g_print("  map_data_to_free: %p\n", (void*)passed_map_data);
-    g_signal_connect(map_window, "delete-event", G_CALLBACK(on_map_window_delete_event_manual_cleanup),
-                     cleanup_data_for_event);
+    g_object_set_data_full(G_OBJECT(map_window), "window_data",
+                          window_data, map_window_data_destroy);
 
-    map_main_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-    gtk_container_add(GTK_CONTAINER(map_window), map_main_vbox);
+    // Automatyczna reaktywacja aplikacji przy zamykaniu okna
+    g_signal_connect_swapped(map_window, "destroy",
+                           G_CALLBACK(g_application_activate), app);
 
-    radio_map_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-    gtk_widget_set_halign(radio_map_hbox, GTK_ALIGN_START);
-    gtk_box_pack_start(GTK_BOX(map_main_vbox), radio_map_hbox, FALSE, FALSE, 0);
+    // Tworzenie UI
+    GtkWidget* main_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(map_window), main_vbox);
 
-    drawing_area_map = gtk_drawing_area_new();
-    g_object_set_data(G_OBJECT(drawing_area_map), "map_data_ptr", passed_map_data);
+    // Radio buttons dla wyboru mapy
+    GtkWidget* radio_hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_widget_set_halign(radio_hbox, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(main_vbox), radio_hbox, FALSE, FALSE, 0);
 
-    radio_ndmi = gtk_radio_button_new_with_label(NULL, "NDMI");
-    gtk_box_pack_start(GTK_BOX(radio_map_hbox), radio_ndmi, FALSE, FALSE, 0);
-    g_signal_connect(radio_ndmi, "toggled", G_CALLBACK(on_map_type_radio_toggled), drawing_area_map);
+    // Drawing area
+    GtkWidget* drawing_area = gtk_drawing_area_new();
+    gtk_widget_set_size_request(drawing_area, map_data->width, map_data->height);
 
-    radio_ndvi = gtk_radio_button_new_with_label_from_widget(GTK_RADIO_BUTTON(radio_ndmi), "NDVI");
-    gtk_box_pack_start(GTK_BOX(radio_map_hbox), radio_ndvi, FALSE, FALSE, 0);
-    g_signal_connect(radio_ndvi, "toggled", G_CALLBACK(on_map_type_radio_toggled), drawing_area_map);
+    // Przypisanie danych do drawing_area (dla funkcji rysowania)
+    g_object_set_data(G_OBJECT(drawing_area), "map_data_ptr", map_data);
+    g_signal_connect(drawing_area, "draw", G_CALLBACK(on_draw_map_area), map_data);
 
-    if (strcmp(passed_map_data->current_map_type, "NDVI") == 0)
-    {
+    // Radio buttons
+    GtkWidget* radio_ndmi = gtk_radio_button_new_with_label(NULL, "NDMI");
+    gtk_box_pack_start(GTK_BOX(radio_hbox), radio_ndmi, FALSE, FALSE, 0);
+    g_signal_connect(radio_ndmi, "toggled", G_CALLBACK(on_map_type_radio_toggled), drawing_area);
+
+    GtkWidget* radio_ndvi = gtk_radio_button_new_with_label_from_widget(GTK_RADIO_BUTTON(radio_ndmi), "NDVI");
+    gtk_box_pack_start(GTK_BOX(radio_hbox), radio_ndvi, FALSE, FALSE, 0);
+    g_signal_connect(radio_ndvi, "toggled", G_CALLBACK(on_map_type_radio_toggled), drawing_area);
+
+    // Ustawienie domyślnego wyboru
+    if (strcmp(map_data->current_map_type, "NDVI") == 0) {
         gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio_ndvi), TRUE);
-    }
-    else
-    {
+    } else {
         gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio_ndmi), TRUE);
     }
 
-    scrolled_window_for_map = gtk_scrolled_window_new(NULL, NULL);
-    gtk_scrolled_window_set_policy(
-        GTK_SCROLLED_WINDOW(scrolled_window_for_map), GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-    gtk_widget_set_hexpand(scrolled_window_for_map, TRUE);
-    gtk_widget_set_vexpand(scrolled_window_for_map, TRUE);
-    gtk_box_pack_start(GTK_BOX(map_main_vbox), scrolled_window_for_map, TRUE, TRUE, 0);
+    // Scrolled window dla drawing area
+    GtkWidget* scrolled_window = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window),
+                                  GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_hexpand(scrolled_window, TRUE);
+    gtk_widget_set_vexpand(scrolled_window, TRUE);
+    gtk_box_pack_start(GTK_BOX(main_vbox), scrolled_window, TRUE, TRUE, 0);
+    gtk_container_add(GTK_CONTAINER(scrolled_window), drawing_area);
 
-    gtk_widget_set_size_request(drawing_area_map, passed_map_data->width, passed_map_data->height);
-    g_signal_connect(drawing_area_map, "draw", G_CALLBACK(on_draw_map_area), passed_map_data);
-    gtk_container_add(GTK_CONTAINER(scrolled_window_for_map), drawing_area_map);
-
-    gtk_widget_show_all(map_window);
+    return map_window;
 }
+
 
 // Handler dla zniszczenia okna konfiguracji
 static void on_config_window_destroy(GtkWidget* widget, gpointer data)
