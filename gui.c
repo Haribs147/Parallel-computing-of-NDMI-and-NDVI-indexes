@@ -521,4 +521,11 @@ static void map_window_data_destroy(gpointer data)
 
     g_free(window_data);
     g_print("[%s] map_window_data_destroy: Cleanup zakończony.\n", get_timestamp());
+
+    // Resetowanie ustawień domyślnych
+    path_b04 = NULL;
+    path_b08 = NULL;
+    path_b11 = NULL;
+    path_scl = NULL;
+    res_10m_selected = TRUE;
 }
