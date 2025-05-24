@@ -35,7 +35,7 @@ typedef struct
 
 // Deklaracje wprzód
 static void activate_config_window(GtkApplication* app);
-static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr, gpointer user_data);
+static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr);
 static void on_config_window_destroy(GtkWidget* widget);
 static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data);
 
@@ -525,31 +525,22 @@ static void activate_config_window(GtkApplication* app)
     gtk_widget_show_all(config_window_local);
 }
 
-static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr, gpointer user_data)
+static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr)
 {
-    IndexMapData* map_data = (IndexMapData*)g_object_get_data(G_OBJECT(widget), "map_data_ptr");
+    IndexMapData* map_data = g_object_get_data(G_OBJECT(widget), "map_data_ptr");
 
     if (!map_data)
     {
-        fprintf(stderr, "on_draw_map_area: map_data_ptr na drawing_area jest NULL. Rysowanie tła.\n");
+        g_printerr("[%s] Błąd tworzenia mapy --- Brak wskaźnika do danych mapy. Rysowanie tła.\n", get_timestamp());
         cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
         cairo_paint(cr);
         return TRUE;
     }
 
-    const float* data_to_render = NULL;
-    if (strcmp(map_data->current_map_type, "NDVI") == 0)
-    {
-        data_to_render = map_data->ndvi_data;
-    }
-    else if (strcmp(map_data->current_map_type, "NDMI") == 0)
-    {
-        data_to_render = map_data->ndmi_data;
-    }
-
+    const float* data_to_render = strcmp(map_data->current_map_type, "NDVI") == 0 ? map_data->ndvi_data : map_data->ndmi_data;
     if (!data_to_render)
     {
-        fprintf(stderr, "on_draw_map_area: data_to_render jest NULL dla typu mapy %s.\n", map_data->current_map_type);
+        g_printerr("[%s] Błąd tworzenia mapy --- Brak wskaźnika do mapy %s.\n", get_timestamp(), map_data->current_map_type);
         cairo_set_source_rgb(cr, 0.2, 0.2, 0.2);
         cairo_paint(cr);
         return TRUE;
@@ -566,7 +557,7 @@ static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr, gpointer user_d
     }
     else
     {
-        fprintf(stderr, "on_draw_map_area: Nie udało się wygenerować pixbuf.\n");
+        g_printerr("[%s] Błąd tworzenia mapy --- Nie udało się wygenerować pixbuf.\n", get_timestamp());
         cairo_set_source_rgb(cr, 1, 0, 0);
         cairo_paint(cr);
     }
