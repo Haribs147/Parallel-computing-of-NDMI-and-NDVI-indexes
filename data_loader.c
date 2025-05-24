@@ -20,6 +20,44 @@ void cleanup_gdal_resources(GDALDatasetH dataset, float* buffer);
 CPLErr perform_raster_read(GDALRasterBandH band, float* buffer, int width, int height);
 void set_output_dimensions(int* output_width, int* output_height, int width, int height);
 
+int load_all_bands_data(BandData bands[4])
+{
+    for (int i = 0; i < 4; i++)
+    {
+        if (!*(bands[i].path) || strlen(*(bands[i].path)) == 0)
+        {
+            fprintf(stderr, "[%s] Błąd: Brak ścieżki dla pasma %s.\n", get_timestamp(), bands[i].band_name);
+            return -1;
+        }
+
+        *(bands[i].raw_data) = LoadBandData(*(bands[i].path), bands[i].width, bands[i].height);
+        if (!*(bands[i].raw_data))
+        {
+            fprintf(stderr, "[%s] Błąd wczytywania pasma %s z pliku: %s\n",
+                    get_timestamp(), bands[i].band_name, *(bands[i].path));
+
+            // Zwolnienie już wczytanych danych
+            for (int j = 0; j < i; j++)
+            {
+                if (*(bands[j].raw_data))
+                {
+                    free(*(bands[j].raw_data));
+                    *(bands[j].raw_data) = NULL;
+                }
+            }
+            return -1;
+        }
+
+        // Ustawienie processed_data na raw_data (początkowo te same dane)
+        *(bands[i].processed_data) = *(bands[i].raw_data);
+
+        printf("[%s] Pomyślnie wczytano pasmo %s (%dx%d pikseli).\n",
+               get_timestamp(), bands[i].band_name, *bands[i].width, *bands[i].height);
+    }
+
+    return 0;
+}
+
 float* LoadBandData(const char* pszFilename, int* pnXSize, int* pnYSize) {
     const char* band_name = detect_band_from_filename(pszFilename);
     struct timeval start_time, end_time;

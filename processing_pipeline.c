@@ -13,7 +13,6 @@
 ProcessingResult* process_bands_and_calculate_indices(BandData bands[4], bool target_10m);
 
 // ====== FUNKCJE POMOCNICZE ======
-static int load_all_bands_data(BandData bands[4]);
 static void get_target_resolution_dimensions(const BandData* bands, bool target_10m,
                                      int* width_out, int* height_out);
 
@@ -107,43 +106,6 @@ ProcessingResult* process_bands_and_calculate_indices(BandData bands[4], bool ta
     return result;
 }
 
-static int load_all_bands_data(BandData bands[4])
-{
-    for (int i = 0; i < 4; i++)
-    {
-        if (!*(bands[i].path) || strlen(*(bands[i].path)) == 0)
-        {
-            fprintf(stderr, "[%s] Błąd: Brak ścieżki dla pasma %s.\n", get_timestamp(), bands[i].band_name);
-            return -1;
-        }
-
-        *(bands[i].raw_data) = LoadBandData(*(bands[i].path), bands[i].width, bands[i].height);
-        if (!*(bands[i].raw_data))
-        {
-            fprintf(stderr, "[%s] Błąd wczytywania pasma %s z pliku: %s\n",
-                    get_timestamp(), bands[i].band_name, *(bands[i].path));
-
-            // Zwolnienie już wczytanych danych
-            for (int j = 0; j < i; j++)
-            {
-                if (*(bands[j].raw_data))
-                {
-                    free(*(bands[j].raw_data));
-                    *(bands[j].raw_data) = NULL;
-                }
-            }
-            return -1;
-        }
-
-        // Ustawienie processed_data na raw_data (początkowo te same dane)
-        *(bands[i].processed_data) = *(bands[i].raw_data);
-
-        printf("[%s] Pomyślnie wczytano pasmo %s (%dx%d pikseli).\n",
-               get_timestamp(), bands[i].band_name, *bands[i].width, *bands[i].height);
-    }
-
-    return 0;
-}
 
 static void get_target_resolution_dimensions(const BandData* bands, bool target_10m,
                                      int* width_out, int* height_out)
