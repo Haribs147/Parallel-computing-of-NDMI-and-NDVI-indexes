@@ -34,9 +34,9 @@ typedef struct
 } MapWindowData;
 
 // Deklaracje wprzód
-static void activate_config_window(GtkApplication* app, gpointer user_data);
+static void activate_config_window(GtkApplication* app);
 static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr, gpointer user_data);
-static void on_config_window_destroy(GtkWidget* widget, gpointer data);
+static void on_config_window_destroy(GtkWidget* widget);
 static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data);
 
 // Zmienne globalne
@@ -363,13 +363,13 @@ static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data)
 {
     if (!map_data)
     {
-        g_printerr("create_map_window_v3: map_data jest NULL.\n");
+        g_printerr("[%s] Błąd tworzenia mapy --- Brak wskaźnika do mapy.\n", get_timestamp());
         return NULL;
     }
 
     if (!map_data->ndvi_data && !map_data->ndmi_data)
     {
-        g_printerr("create_map_window_v3: Brak danych NDVI/NDMI.\n");
+        g_printerr("[%s] Błąd tworzenia mapy --- Brak danych NDMI / NDVI.\n", get_timestamp());
         free_index_map_data(map_data);
         return NULL;
     }
@@ -442,37 +442,30 @@ static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data)
 
 
 // Handler dla zniszczenia okna konfiguracji
-static void on_config_window_destroy(GtkWidget* widget, gpointer data)
+static void on_config_window_destroy(GtkWidget* widget)
 {
-    g_print("on_config_window_destroy: Okno konfiguracji %p zniszczone. Ustawiam the_config_window na NULL.\n",
-            (void*)widget);
     if (the_config_window == widget)
     {
         the_config_window = NULL;
     }
 }
 
-static void activate_config_window(GtkApplication* app, gpointer user_data)
+static void activate_config_window(GtkApplication* app)
 {
     if (the_config_window)
     {
         if (gtk_widget_get_visible(the_config_window))
         {
-            g_print("activate_config_window: Okno konfiguracji już istnieje i jest widoczne, prezentuję %p.\n",
-                    (void*)the_config_window);
             gtk_window_present(GTK_WINDOW(the_config_window));
         }
         else
         {
-            g_print("activate_config_window: Okno konfiguracji już istnieje, ale nie jest widoczne, pokazuję %p.\n",
-                    (void*)the_config_window);
             gtk_widget_show_all(the_config_window);
             gtk_window_present(GTK_WINDOW(the_config_window));
         }
         return;
     }
 
-    g_print("activate_config_window: Tworzenie nowego okna konfiguracji.\n");
     GtkWidget* config_window_local;
     GtkWidget* main_vbox;
     GtkWidget* radio_hbox_config;
