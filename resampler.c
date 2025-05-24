@@ -3,7 +3,12 @@
 #include <math.h>
 
 #include "resampler.h"
+
+#include <stdint.h>
+#include <glib/gmessages.h>
+
 #include "utils.h"
+#include "data_types.h"
 
 typedef struct
 {

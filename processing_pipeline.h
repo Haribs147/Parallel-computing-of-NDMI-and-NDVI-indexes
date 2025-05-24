@@ -1,7 +1,7 @@
 #ifndef PROCESSING_PIPELINE_H
 #define PROCESSING_PIPELINE_H
 
-#include "gui_utils.h"
+#include "data_types.h"
 #include <stdbool.h>
 
 typedef struct

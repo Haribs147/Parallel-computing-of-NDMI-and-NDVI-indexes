@@ -29,7 +29,7 @@ $(TARGET): $(OBJS)
 # Reguły kompilacji
 main.o: main.c gui.h
 	@$(CC) $(CFLAGS) -c main.c -o main.o
-gui.o: gui.c gui.h gui_utils.h data_loader.h resampler.h utils.h index_calculator.h visualization.h processing_pipeline.h
+gui.o: gui.c gui.h gui_utils.h data_loader.h resampler.h utils.h index_calculator.h visualization.h processing_pipeline.h data_types.h
 	@$(CC) $(CFLAGS) -c gui.c -o gui.o
 gui_utils.o: gui_utils.c gui_utils.h utils.h
 	@$(CC) $(CFLAGS) -c gui_utils.c -o gui_utils.o
@@ -43,7 +43,7 @@ index_calculator.o: index_calculator.c index_calculator.h
 	@$(CC) $(CFLAGS) -c index_calculator.c -o index_calculator.o
 visualization.o: visualization.c visualization.h index_calculator.h
 	@$(CC) $(CFLAGS) -c visualization.c -o visualization.o
-processing_pipeline.o: processing_pipeline.c processing_pipeline.h data_loader.h resampler.h index_calculator.h utils.h
+processing_pipeline.o: processing_pipeline.c processing_pipeline.h data_loader.h resampler.h index_calculator.h utils.h data_types.h
 	@$(CC) $(CFLAGS) -c processing_pipeline.c -o processing_pipeline.o
 # Reguła czyszczenia
 clean:

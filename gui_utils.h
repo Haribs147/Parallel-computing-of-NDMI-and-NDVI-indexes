@@ -4,29 +4,12 @@
 #include <gtk/gtk.h>
 #include "utils.h"
 
-typedef struct {
+typedef struct
+{
     const char* suffix;
     const char* prefix;
     const char* default_text;
 } BandConfig;
-
-typedef struct {
-    char** path;
-    float** raw_data;
-    float** processed_data;
-    int* width;
-    int* height;
-    const char* band_name;
-    int band_index;
-} BandData;
-
-enum BandType
-{
-    B04,
-    B08,
-    B11,
-    SCL
-};
 
 extern const BandConfig band_configs[];
 
@@ -41,9 +24,9 @@ void update_button_label(GtkButton* button, const char* filepath, const char* pr
 // Funkcje pomocnicze dla wyboru plików
 const BandConfig* get_band_config(const gchar* dialog_title_suffix);
 void update_file_selection(char** target_path_variable, GtkButton* button_to_update,
-                          GtkFileChooser* file_chooser, const BandConfig* config);
+                           GtkFileChooser* file_chooser, const BandConfig* config);
 void handle_file_selection(GtkWindow* parent_window, const gchar* dialog_title_suffix,
-                          char** target_path_variable, GtkButton* button_to_update);
+                           char** target_path_variable, GtkButton* button_to_update);
 void show_error_dialog(GtkWindow* parent_window, const char* message);
 
 // Funkcja pomocnicza do odroczonego niszczenia widgetu

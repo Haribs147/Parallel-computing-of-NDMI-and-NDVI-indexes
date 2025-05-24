@@ -3,6 +3,7 @@
 #include "resampler.h"
 #include "index_calculator.h"
 #include "utils.h"
+#include "data_types.h"
 
 #include <stdio.h>
 #include <stdlib.h>

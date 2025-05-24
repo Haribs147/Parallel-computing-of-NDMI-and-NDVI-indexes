@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include "data_types.h"
 
 #include "gui.h"
 #include "gui_utils.h"
