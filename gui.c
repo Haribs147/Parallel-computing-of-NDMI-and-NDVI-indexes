@@ -335,10 +335,10 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
     float* processed_data[4] = {NULL};
 
     BandData bands[4] = {
-        {&path_b04, &btn_load_b04_widget, &raw_data[0], &processed_data[0], &widths[0], &heights[0], "B04", 0},
-        {&path_b08, &btn_load_b08_widget, &raw_data[1], &processed_data[1], &widths[1], &heights[1], "B08", 1},
-        {&path_b11, &btn_load_b11_widget, &raw_data[2], &processed_data[2], &widths[2], &heights[2], "B11", 2},
-        {&path_scl, &btn_load_scl_widget, &raw_data[3], &processed_data[3], &widths[3], &heights[3], "SCL", 3}
+        {&path_b04, &raw_data[0], &processed_data[0], &widths[0], &heights[0], "B04", 0},
+        {&path_b08, &raw_data[1], &processed_data[1], &widths[1], &heights[1], "B08", 1},
+        {&path_b11, &raw_data[2], &processed_data[2], &widths[2], &heights[2], "B11", 2},
+        {&path_scl, &raw_data[3], &processed_data[3], &widths[3], &heights[3], "SCL", 3}
     };
 
     // Walidacja ścieżek plików

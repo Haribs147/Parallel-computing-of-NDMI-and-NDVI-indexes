@@ -12,7 +12,6 @@ typedef struct {
 
 typedef struct {
     char** path;
-    GtkWidget** button;
     float** raw_data;
     float** processed_data;
     int* width;
