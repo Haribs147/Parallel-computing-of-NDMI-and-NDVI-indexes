@@ -11,6 +11,7 @@
 #include "resampler.h"
 #include "utils.h"
 #include "index_calculator.h"
+#include "processing_pipeline.h"
 #include "visualization.h"
 
 #define DEFAULT_WINDOW_WIDTH 900
@@ -65,15 +66,10 @@ static void on_map_type_radio_toggled(GtkToggleButton* togglebutton, gpointer us
 static int validate_band_paths(BandData bands[], int band_count, GtkWindow* parent_window);
 
 // ====== PRZETWARZANIE DANYCH ======
-static int load_all_bands_data(BandData bands[4]);
-static void get_target_resolution_dimensions(const BandData* bands, bool target_resolution_10m,
-                                             int* width_out, int* height_out);
-static int process_bands_and_calculate_indices(BandData bands[4], bool res_10m_selected,
-                                               IndexMapData** out_map_data);
+static IndexMapData* convert_processing_result_to_map_data(ProcessingResult* processing_result);
 
 // ====== PAMIĘĆ ======
 static void free_index_map_data(gpointer data);
-static void free_band_data(BandData bands[4]);
 static void map_window_data_destroy(gpointer data);
 
 // ====== IMPLEMENTACJE - GUI GŁÓWNE ======
@@ -246,10 +242,13 @@ static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr)
         return TRUE;
     }
 
-    const float* data_to_render = strcmp(map_data->current_map_type, "NDVI") == 0 ? map_data->ndvi_data : map_data->ndmi_data;
+    const float* data_to_render = strcmp(map_data->current_map_type, "NDVI") == 0
+                                      ? map_data->ndvi_data
+                                      : map_data->ndmi_data;
     if (!data_to_render)
     {
-        g_printerr("[%s] Błąd tworzenia mapy --- Brak wskaźnika do mapy %s.\n", get_timestamp(), map_data->current_map_type);
+        g_printerr("[%s] Błąd tworzenia mapy --- Brak wskaźnika do mapy %s.\n", get_timestamp(),
+                   map_data->current_map_type);
         cairo_set_source_rgb(cr, 0.2, 0.2, 0.2);
         cairo_paint(cr);
         return TRUE;
@@ -330,6 +329,7 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
     GtkWidget* config_window_widget = GTK_WIDGET(user_data);
     GtkWindow* parent_gtk_window = GTK_WINDOW(user_data);
 
+    // Przygotowanie danych pasm
     int widths[4], heights[4];
     float* raw_data[4] = {NULL};
     float* processed_data[4] = {NULL};
@@ -341,34 +341,48 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
         {&path_scl, &btn_load_scl_widget, &raw_data[3], &processed_data[3], &widths[3], &heights[3], "SCL", 3}
     };
 
+    // Walidacja ścieżek plików
     if (!validate_band_paths(bands, 4, parent_gtk_window))
     {
         return;
     }
 
-    g_print("[%s] Rozpoczynanie wczytywania danych pasm.\n", get_timestamp());
+    g_print("[%s] Rozpoczynanie przetwarzania danych pasm.\n", get_timestamp());
 
-    IndexMapData* map_display_data = NULL;
-    int processing_result = process_bands_and_calculate_indices(bands, res_10m_selected, &map_display_data);
+    // Przetwarzanie przez pipeline
+    ProcessingResult* processing_result = process_bands_and_calculate_indices(bands, res_10m_selected);
 
-    if (processing_result != 0)
+    if (!processing_result)
     {
         g_printerr("[%s] Wystąpił błąd podczas przetwarzania danych.\n", get_timestamp());
-        show_error_dialog(parent_gtk_window, "Błąd podczas przetwarzania danych. Sprawdź konsolę.");
+        show_error_dialog(parent_gtk_window, "Błąd podczas przetwarzania danych. Sprawdź konsolę dla szczegółów.");
         return;
     }
 
+    // Konwersja wyniku na format GUI
+    IndexMapData* map_display_data = convert_processing_result_to_map_data(processing_result);
+    if (!map_display_data)
+    {
+        g_printerr("[%s] Błąd podczas konwersji danych dla GUI.\n", get_timestamp());
+        show_error_dialog(parent_gtk_window, "Błąd podczas przygotowywania danych do wyświetlenia.");
+        return;
+    }
+
+    // Tworzenie okna mapy
     GtkApplication* app = gtk_window_get_application(GTK_WINDOW(config_window_widget));
     GtkWidget* map_window = create_map_window(app, map_display_data);
 
     if (map_window)
     {
+        g_print("[%s] Pomyślnie utworzono okno mapy.\n", get_timestamp());
         gtk_widget_show_all(map_window);
         gtk_widget_destroy(config_window_widget);
     }
     else
     {
+        g_printerr("[%s] Błąd podczas tworzenia okna mapy.\n", get_timestamp());
         show_error_dialog(parent_gtk_window, "Błąd podczas tworzenia okna mapy.");
+        free_index_map_data(map_display_data);
     }
 }
 
@@ -427,107 +441,35 @@ static int validate_band_paths(BandData bands[], int band_count, GtkWindow* pare
 }
 
 // ====== IMPLEMENTACJE - PRZETWARZANIE DANYCH ======
-
-static int load_all_bands_data(BandData bands[4])
+static IndexMapData* convert_processing_result_to_map_data(ProcessingResult* processing_result)
 {
-    // Wczytywanie danych dla wszystkich pasm
-    for (int i = 0; i < 4; i++)
+    if (!processing_result)
     {
-        *(bands[i].raw_data) = LoadBandData(*(bands[i].path), bands[i].width, bands[i].height);
-        if (!*(bands[i].raw_data))
-        {
-            fprintf(stderr, "Błąd wczytywania %s!\n", bands[i].band_name);
-            return -1;
-        }
-        *(bands[i].processed_data) = *(bands[i].raw_data);
-    }
-    return 0;
-}
-
-static void get_target_resolution_dimensions(const BandData* bands, bool target_resolution_10m,
-                                             int* width_out, int* height_out)
-{
-    if (target_resolution_10m)
-    {
-        *width_out = *bands[B04].width;
-        *height_out = *bands[B04].height;
-    }
-    else
-    {
-        *width_out = *bands[B11].width;
-        *height_out = *bands[B11].height;
-    }
-}
-
-static int process_bands_and_calculate_indices(BandData bands[4], bool res_10m_selected,
-                                               IndexMapData** out_map_data)
-{
-    float* ndvi_result = NULL;
-    float* ndmi_result = NULL;
-    IndexMapData* map_display_data = NULL;
-    int final_processing_width, final_processing_height;
-
-    // Load all bands data
-    if (load_all_bands_data(bands) != 0)
-    {
-        return -1;
+        return NULL;
     }
 
-    // Get target resolution dimensions
-    get_target_resolution_dimensions(bands, res_10m_selected,
-                                     &final_processing_width, &final_processing_height);
-
-    // Resample bands to target resolution
-    if (resample_all_bands_to_target_resolution(bands, 4, res_10m_selected) != 0)
-    {
-        free_band_data(bands);
-        return -1;
-    }
-
-    // Calculate NDVI
-    ndvi_result = calculate_ndvi(*bands[B08].processed_data, *bands[B04].processed_data,
-                                 final_processing_width, final_processing_height,
-                                 *bands[SCL].processed_data);
-    if (!ndvi_result)
-    {
-        g_printerr("[%s] Błąd podczas obliczania NDVI.\n", get_timestamp());
-        free_band_data(bands);
-        return -1;
-    }
-
-    // Calculate NDMI
-    ndmi_result = calculate_ndmi(*bands[B08].processed_data, *bands[B11].processed_data,
-                                 final_processing_width, final_processing_height,
-                                 *bands[SCL].processed_data);
-    if (!ndmi_result)
-    {
-        g_printerr("[%s] Błąd podczas obliczania NDMI.\n", get_timestamp());
-        free(ndvi_result);
-        free_band_data(bands);
-        return -1;
-    }
-
-    // Free processed band data as we no longer need it
-    free_band_data(bands);
-
-    // Prepare display data
-    map_display_data = g_new(IndexMapData, 1);
-    if (!map_display_data)
+    IndexMapData* map_data = g_new(IndexMapData, 1);
+    if (!map_data)
     {
         g_printerr("[%s] Błąd alokacji pamięci dla IndexMapData.\n", get_timestamp());
-        free(ndvi_result);
-        free(ndmi_result);
-        return -1;
+        return NULL;
     }
 
-    map_display_data->ndvi_data = ndvi_result;
-    map_display_data->ndmi_data = ndmi_result;
-    map_display_data->width = final_processing_width;
-    map_display_data->height = final_processing_height;
-    strcpy(map_display_data->current_map_type, "NDVI");
+    // Przeniesienie danych z ProcessingResult do IndexMapData
+    map_data->ndvi_data = processing_result->ndvi_data;
+    map_data->ndmi_data = processing_result->ndmi_data;
+    map_data->width = processing_result->width;
+    map_data->height = processing_result->height;
+    strcpy(map_data->current_map_type, "NDVI");
 
-    *out_map_data = map_display_data;
-    return 0;
+    // Wyzerowanie wskaźników w ProcessingResult, żeby nie zostały zwolnione
+    processing_result->ndvi_data = NULL;
+    processing_result->ndmi_data = NULL;
+
+    // Zwolnienie struktury ProcessingResult (ale nie danych, które przejęliśmy)
+    free(processing_result);
+
+    return map_data;
 }
 
 // ====== IMPLEMENTACJE - PAMIĘĆ ======
@@ -557,23 +499,6 @@ static void free_index_map_data(gpointer data)
 
     g_free(map_data);
     g_print("[%s] Zakończono zwalnianie danych mapy.\n", get_timestamp());
-}
-
-static void free_band_data(BandData bands[4])
-{
-    for (int i = 0; i < 4; i++)
-    {
-        if (*(bands[i].processed_data))
-        {
-            free(*(bands[i].processed_data));
-        }
-        else if (*(bands[i].raw_data))
-        {
-            free(*(bands[i].raw_data));
-        }
-        *(bands[i].raw_data) = NULL;
-        *(bands[i].processed_data) = NULL;
-    }
 }
 
 static void map_window_data_destroy(gpointer data)
