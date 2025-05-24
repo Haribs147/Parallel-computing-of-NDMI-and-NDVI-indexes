@@ -2,14 +2,6 @@
 #include <pango/pango.h>
 #include <stdio.h>
 
-const BandConfig band_configs[] = {
-    {"pasma B04", "B04: ", "Wczytaj pasmo B04"},
-    {"pasma B08", "B08: ", "Wczytaj pasmo B08"},
-    {"pasma B11", "B11: ", "Wczytaj pasmo B11"},
-    {"pasma SCL", "SCL: ", "Wczytaj pasmo SCL"},
-    {NULL, "Plik: ", "Wybierz plik"} // default
-};
-
 GtkWidget* create_button_with_ellipsis(const char* label) {
     GtkWidget* button = gtk_button_new_with_label(label);
     set_button_label_ellipsis(GTK_BUTTON(button));
@@ -52,54 +44,6 @@ void update_button_label(GtkButton* button, const char* filepath, const char* pr
 
     // Ustawienie ellipsis dla długich nazw
     set_button_label_ellipsis(button);
-}
-
-const BandConfig* get_band_config(const gchar* dialog_title_suffix) {
-    for (int i = 0; band_configs[i].suffix != NULL; i++) {
-        if (g_strcmp0(dialog_title_suffix, band_configs[i].suffix) == 0) {
-            return &band_configs[i];
-        }
-    }
-    return &band_configs[4]; // default
-}
-
-void update_file_selection(char** target_path_variable, GtkButton* button_to_update,
-                          GtkFileChooser* file_chooser, const BandConfig* config) {
-    char* filename_path = gtk_file_chooser_get_filename(file_chooser);
-    if (!filename_path) {
-        return; // Brak wybranego pliku
-    }
-
-    // Zwolnienie starej ścieżki
-    if (*target_path_variable) {
-        g_free(*target_path_variable);
-    }
-    *target_path_variable = g_strdup(filename_path);
-
-    // Aktualizacja etykiety przycisku
-    update_button_label(button_to_update, filename_path, config->prefix);
-
-    g_free(filename_path);
-}
-
-void handle_file_selection(GtkWindow* parent_window, const gchar* dialog_title_suffix,
-                          char** target_path_variable, GtkButton* button_to_update) {
-    const BandConfig* config = get_band_config(dialog_title_suffix);
-
-    char dialog_title[150];
-    snprintf(dialog_title, sizeof(dialog_title), "Wybierz plik dla %s", dialog_title_suffix);
-
-    GtkWidget* dialog = create_file_dialog(parent_window, dialog_title);
-    gint res = gtk_dialog_run(GTK_DIALOG(dialog));
-
-    if (res == GTK_RESPONSE_ACCEPT) {
-        update_file_selection(target_path_variable, button_to_update,
-                             GTK_FILE_CHOOSER(dialog), config);
-    } else if (!(*target_path_variable)) {
-        gtk_button_set_label(button_to_update, config->default_text);
-    }
-
-    gtk_widget_destroy(dialog);
 }
 
 gboolean destroy_widget_idle(gpointer data) {
