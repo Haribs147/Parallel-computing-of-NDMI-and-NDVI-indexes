@@ -175,19 +175,6 @@ static void activate_config_window(GtkApplication* app)
 
 static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data)
 {
-    if (!map_data)
-    {
-        g_printerr("[%s] Błąd tworzenia mapy --- Brak wskaźnika do mapy.\n", get_timestamp());
-        return NULL;
-    }
-
-    if (!map_data->ndvi_data && !map_data->ndmi_data)
-    {
-        g_printerr("[%s] Błąd tworzenia mapy --- Brak danych NDMI / NDVI.\n", get_timestamp());
-        free_index_map_data(map_data);
-        return NULL;
-    }
-
     // Tworzenie okna
     GtkWidget* map_window = gtk_application_window_new(app);
     gtk_window_set_title(GTK_WINDOW(map_window), "Wynikowa Mapa Wskaźników");
@@ -258,26 +245,9 @@ static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr)
 {
     IndexMapData* map_data = g_object_get_data(G_OBJECT(widget), "map_data_ptr");
 
-    if (!map_data)
-    {
-        g_printerr("[%s] Błąd tworzenia mapy --- Brak wskaźnika do danych mapy. Rysowanie tła.\n", get_timestamp());
-        cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
-        cairo_paint(cr);
-        return TRUE;
-    }
-
     const float* data_to_render = strcmp(map_data->current_map_type, "NDVI") == 0
                                       ? map_data->ndvi_data
                                       : map_data->ndmi_data;
-    if (!data_to_render)
-    {
-        g_printerr("[%s] Błąd tworzenia mapy --- Brak wskaźnika do mapy %s.\n", get_timestamp(),
-                   map_data->current_map_type);
-        cairo_set_source_rgb(cr, 0.2, 0.2, 0.2);
-        cairo_paint(cr);
-        return TRUE;
-    }
-
     GdkPixbuf* pixbuf = generate_pixbuf_from_index_data(data_to_render,
                                                         map_data->width,
                                                         map_data->height);

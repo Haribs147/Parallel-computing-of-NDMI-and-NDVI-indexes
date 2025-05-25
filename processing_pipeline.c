@@ -178,7 +178,7 @@ static int validate_processing_inputs(const BandData bands[4])
 {
     for (int i = 0; i < 4; i++)
     {
-        if (!bands[i].path || !*(bands[i].path))
+        if (!bands[i].path)
         {
             fprintf(stderr, "[%s] Błąd walidacji: Brak ścieżki dla pasma %s.\n",
                     get_timestamp(), bands[i].band_name);

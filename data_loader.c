@@ -24,12 +24,6 @@ int load_all_bands_data(BandData bands[4])
 {
     for (int i = 0; i < 4; i++)
     {
-        if (!*(bands[i].path) || strlen(*(bands[i].path)) == 0)
-        {
-            fprintf(stderr, "[%s] Błąd: Brak ścieżki dla pasma %s.\n", get_timestamp(), bands[i].band_name);
-            return -1;
-        }
-
         *(bands[i].raw_data) = LoadBandData(*(bands[i].path), bands[i].width, bands[i].height);
         if (!*(bands[i].raw_data))
         {
