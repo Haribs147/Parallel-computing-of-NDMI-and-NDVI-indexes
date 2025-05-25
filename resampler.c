@@ -14,32 +14,38 @@ typedef struct
 {
     int target_width;
     int target_height;
-    gboolean is_10m_resolution;
 } ResamplingParams;
 
 // ====== WALIDACJA ======
-int validate_input_params(const float* input_band, int input_width, int input_height, int output_width, int output_height);
+int validate_input_params(const float* input_band, int input_width, int input_height, int output_width,
+                          int output_height);
 int validate_output_size(int output_width, int output_height, size_t* num_pixels);
 // ====== PAMIĘĆ ======
 float* allocate_output_band(size_t num_pixels);
-float* prepare_data(const float* input_band, int input_width, int input_height, int output_width, int output_height, const char* error_suffix);
+float* prepare_data(const float* input_band, int input_width, int input_height, int output_width, int output_height,
+                    const char* error_suffix);
 void replace_band_data(BandData* band_data, float* new_data);
 // ====== FUNKCJONALNOŚĆ ======
 int resample_single_band(BandData* band_data, int band_index, const ResamplingParams* params);
 // ====== ALGORYTMY RESAMPLINGU ======
-void perform_nearest_neighbor_resample(const float* input_band, float* output_band, int input_width, int input_height, int output_width, int output_height);
-float* nearest_neighbor_resample_scl(const float* input_band, int input_width, int input_height, int output_width, int output_height);
-void perform_bilinear_resample(const float* input_band, float* output_band, int input_width, int input_height, int output_width, int output_height);
-float* bilinear_resample_float(const float* input_band, int input_width, int input_height, int output_width, int output_height);
-void perform_average_resample(const float* input_band, float* output_band, int input_width, int input_height, int output_width, int output_height);
-float* average_resample_float(const float* input_band, int input_width, int input_height, int output_width, int output_height);
+void perform_nearest_neighbor_resample(const float* input_band, float* output_band, int input_width, int input_height,
+                                       int output_width, int output_height);
+float* nearest_neighbor_resample_scl(const float* input_band, int input_width, int input_height, int output_width,
+                                     int output_height);
+void perform_bilinear_resample(const float* input_band, float* output_band, int input_width, int input_height,
+                               int output_width, int output_height);
+float* bilinear_resample_float(const float* input_band, int input_width, int input_height, int output_width,
+                               int output_height);
+void perform_average_resample(const float* input_band, float* output_band, int input_width, int input_height,
+                              int output_width, int output_height);
+float* average_resample_float(const float* input_band, int input_width, int input_height, int output_width,
+                              int output_height);
 
 
 int resample_all_bands_to_target_resolution(BandData* bands, int band_count, gboolean target_resolution_10m)
 {
     // Przygotuj parametry resamplingu
     ResamplingParams params;
-    params.is_10m_resolution = target_resolution_10m;
 
     if (target_resolution_10m)
     {
@@ -385,13 +391,6 @@ float* average_resample_float(
 
 void replace_band_data(BandData* band_data, float* new_data)
 {
-    // Zwolnij dane
-    if (*band_data->processed_data != *band_data->raw_data && *band_data->processed_data != NULL)
-    {
-        free(*band_data->processed_data);
-    }
-
-    // Zamień dane
     *band_data->processed_data = new_data;
 }
 
@@ -407,72 +406,59 @@ int resample_single_band(BandData* band_data, int band_index, const ResamplingPa
     struct timeval start_time, end_time;
     double elapsed_time;
 
-    if (params->is_10m_resolution)
+    switch (band_index)
     {
-        // Upsampling do 10m rozdzielczości
-        switch (band_index)
-        {
-        case B11:
-            gettimeofday(&start_time, NULL);
-            g_print("[%s] [B11] Rozpoczynam upsampling\n", get_timestamp());
-            resampled = bilinear_resample_float(
-                *band_data->raw_data,
-                *band_data->width,
-                *band_data->height,
-                params->target_width,
-                params->target_height
-            );
-            gettimeofday(&end_time, NULL);
-            elapsed_time = get_time_diff(start_time, end_time);
-            g_print("[%s] [B11] Zakończono upsampling (czas: %.2fs)\n", get_timestamp(), elapsed_time);
-            break;
+    case B11:
+        gettimeofday(&start_time, NULL);
+        g_print("[%s] [B11] Rozpoczynam upsampling\n", get_timestamp());
+        resampled = bilinear_resample_float(
+            *band_data->raw_data,
+            *band_data->width,
+            *band_data->height,
+            params->target_width,
+            params->target_height
+        );
+        gettimeofday(&end_time, NULL);
+        elapsed_time = get_time_diff(start_time, end_time);
+        g_print("[%s] [B11] Zakończono upsampling (czas: %.2fs)\n", get_timestamp(), elapsed_time);
+        break;
 
-        case SCL:
-            gettimeofday(&start_time, NULL);
-            g_print("[%s] [SCL] Rozpoczynam upsampling\n", get_timestamp());
-            resampled = nearest_neighbor_resample_scl(
-                *band_data->raw_data,
-                *band_data->width,
-                *band_data->height,
-                params->target_width,
-                params->target_height
-            );
-            gettimeofday(&end_time, NULL);
-            elapsed_time = get_time_diff(start_time, end_time);
-            g_print("[%s] [SCL] Zakończono upsampling (czas: %.2fs)\n", get_timestamp(), elapsed_time);
-            break;
+    case SCL:
+        gettimeofday(&start_time, NULL);
+        g_print("[%s] [SCL] Rozpoczynam upsampling\n", get_timestamp());
+        resampled = nearest_neighbor_resample_scl(
+            *band_data->raw_data,
+            *band_data->width,
+            *band_data->height,
+            params->target_width,
+            params->target_height
+        );
+        gettimeofday(&end_time, NULL);
+        elapsed_time = get_time_diff(start_time, end_time);
+        g_print("[%s] [SCL] Zakończono upsampling (czas: %.2fs)\n", get_timestamp(), elapsed_time);
+        break;
 
-        default:
-            // B04 i B08 już mają rozdzielczość 10m
-            return 0;
-        }
-    }
-    else
-    {
-        // Downsampling do 20m rozdzielczości
-        switch (band_index)
-        {
-        case B04:
-        case B08:
-            // B04 i B08 - averaging downsampling
-            gettimeofday(&start_time, NULL);
-            g_print("[%s] [%s] Rozpoczynam downsampling\n", get_timestamp(), band_data->band_name);
-            resampled = average_resample_float(
-                *band_data->raw_data,
-                *band_data->width,
-                *band_data->height,
-                params->target_width,
-                params->target_height
-            );
-            gettimeofday(&end_time, NULL);
-            elapsed_time = get_time_diff(start_time, end_time);
-            g_print("[%s] [%s] Zakończono downsampling (czas: %.2fs)\n", get_timestamp(), band_data->band_name, elapsed_time);
-            break;
+    case B04:
+    case B08:
+        // B04 i B08 - averaging downsampling
+        gettimeofday(&start_time, NULL);
+        g_print("[%s] [%s] Rozpoczynam downsampling\n", get_timestamp(), band_data->band_name);
+        resampled = average_resample_float(
+            *band_data->raw_data,
+            *band_data->width,
+            *band_data->height,
+            params->target_width,
+            params->target_height
+        );
+        gettimeofday(&end_time, NULL);
+        elapsed_time = get_time_diff(start_time, end_time);
+        g_print("[%s] [%s] Zakończono downsampling (czas: %.2fs)\n", get_timestamp(), band_data->band_name,
+                elapsed_time);
+        break;
 
-        default:
-            // B11 i SCL już mają rozdzielczość 20m
-            return 0;
-        }
+    default:
+        // B04 i B08 już mają rozdzielczość 10m
+        return 0;
     }
 
     if (!resampled)
