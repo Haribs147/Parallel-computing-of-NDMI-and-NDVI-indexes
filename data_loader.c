@@ -1,71 +1,223 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h> // Dla CPLGetLastErrorMsg w niektórych konfiguracjach GDAL
+#include <string.h>
+#include <time.h>
+#include <sys/time.h>
 #include <gdal.h>
-
 #include "data_loader.h"
+#include "utils.h"
 
-// Definicja funkcji LoadBandData (przeniesiona z Twojego "kodzika")
+// ====== WALIDACJA ======
+int validate_filename(const char* filename);
+int validate_gdal_dataset(GDALDatasetH dataset, const char* filename);
+int validate_raster_dimensions(int width, int height, const char* filename);
+int validate_raster_band(GDALRasterBandH band, const char* filename);
+int validate_buffer_allocation(float* buffer, size_t num_pixels, const char* filename);
+// ====== PAMIĘĆ ======
+float* allocate_band_buffer(int width, int height, const char* filename);
+void cleanup_gdal_resources(GDALDatasetH dataset, float* buffer);
+// ====== FUNKCJONALNOŚĆ ======
+CPLErr perform_raster_read(GDALRasterBandH band, float* buffer, int width, int height);
+void set_output_dimensions(int* output_width, int* output_height, int width, int height);
+
+int load_all_bands_data(BandData bands[4])
+{
+    for (int i = 0; i < 4; i++)
+    {
+        *(bands[i].raw_data) = LoadBandData(*(bands[i].path), bands[i].width, bands[i].height);
+        if (!*(bands[i].raw_data))
+        {
+            fprintf(stderr, "[%s] Błąd wczytywania pasma %s z pliku: %s\n",
+                    get_timestamp(), bands[i].band_name, *(bands[i].path));
+
+            // Zwolnienie już wczytanych danych
+            for (int j = 0; j < i; j++)
+            {
+                if (*(bands[j].raw_data))
+                {
+                    free(*(bands[j].raw_data));
+                    *(bands[j].raw_data) = NULL;
+                }
+            }
+            return -1;
+        }
+
+        // Ustawienie processed_data na raw_data (początkowo te same dane)
+        *(bands[i].processed_data) = *(bands[i].raw_data);
+
+        printf("[%s] Pomyślnie wczytano pasmo %s (%dx%d pikseli).\n",
+               get_timestamp(), bands[i].band_name, *bands[i].width, *bands[i].height);
+    }
+
+    return 0;
+}
+
 float* LoadBandData(const char* pszFilename, int* pnXSize, int* pnYSize) {
-    GDALDatasetH hDataset;
-    GDALRasterBandH hBand;
-    float* pafScanline = NULL; // Zainicjuj na NULL
-    int nXSize = 0, nYSize = 0; // Zainicjuj
+    const char* band_name = detect_band_from_filename(pszFilename);
+    struct timeval start_time, end_time;
+    gettimeofday(&start_time, NULL);
+
+    printf("[%s] [%s] Rozpoczynam wczytywanie pliku\n", get_timestamp(), band_name);
+
+    // Walidacja wejścia
+    if (!validate_filename(pszFilename)) {
+        return NULL;
+    }
+
+    // Inicjalizacja zmiennych
+    GDALDatasetH hDataset = NULL;
+    GDALRasterBandH hBand = NULL;
+    float* pafScanline = NULL;
+    int nXSize = 0, nYSize = 0;
     CPLErr eErr;
 
-    // GDALAllRegister() jest teraz wywoływane w gui.c w run_gui(), więc nie tutaj.
-
+    // Otwieranie datasetu
     hDataset = GDALOpen(pszFilename, GA_ReadOnly);
-    if (hDataset == NULL) {
-        fprintf(stderr, "Nie można otworzyć pliku %s: %s\n", pszFilename, CPLGetLastErrorMsg());
+    if (!validate_gdal_dataset(hDataset, pszFilename)) {
         return NULL;
     }
 
+    // Pobieranie wymiarów
     nXSize = GDALGetRasterXSize(hDataset);
     nYSize = GDALGetRasterYSize(hDataset);
-    
-    // Zapisz wymiary tylko jeśli wskaźniki nie są NULL
-    if (pnXSize != NULL) {
-        *pnXSize = nXSize;
-    }
-    if (pnYSize != NULL) {
-        *pnYSize = nYSize;
-    }
 
-    // Sprawdź, czy wymiary są poprawne przed alokacją pamięci
-    if (nXSize <= 0 || nYSize <= 0) {
-        fprintf(stderr, "Nieprawidłowe wymiary rastra w pliku %s (%dx%d).\n", pszFilename, nXSize, nYSize);
-        GDALClose(hDataset);
+    // Walidacja wymiarów
+    if (!validate_raster_dimensions(nXSize, nYSize, pszFilename)) {
+        cleanup_gdal_resources(hDataset, NULL);
         return NULL;
     }
 
+    // Ustawienie wymiarów wyjściowych
+    set_output_dimensions(pnXSize, pnYSize, nXSize, nYSize);
+
+    // Pobieranie pasma
     hBand = GDALGetRasterBand(hDataset, 1);
-    if (hBand == NULL) {
-        fprintf(stderr, "Nie można pobrać pasma z pliku %s: %s\n", pszFilename, CPLGetLastErrorMsg());
-        GDALClose(hDataset);
+    if (!validate_raster_band(hBand, pszFilename)) {
+        cleanup_gdal_resources(hDataset, NULL);
         return NULL;
     }
 
-    // Użyj size_t dla iloczynu, aby uniknąć przepełnienia przy dużych obrazach
-    size_t num_pixels = (size_t)nXSize * nYSize;
-    pafScanline = (float*)malloc(sizeof(float) * num_pixels);
+    // Alokacja bufora
+    pafScanline = allocate_band_buffer(nXSize, nYSize, pszFilename);
     if (pafScanline == NULL) {
-        fprintf(stderr, "Błąd alokacji pamięci dla %zu pikseli danych pasma z pliku %s.\n", num_pixels, pszFilename);
-        GDALClose(hDataset);
+        cleanup_gdal_resources(hDataset, NULL);
         return NULL;
     }
 
-    eErr = GDALRasterIO(hBand, GF_Read, 0, 0, nXSize, nYSize,
-                        pafScanline, nXSize, nYSize, GDT_Float32,
-                        0, 0);
-
+    // Wczytywanie danych
+    printf("[%s] [%s] Wczytywanie danych...\n", get_timestamp(), band_name);
+    eErr = perform_raster_read(hBand, pafScanline, nXSize, nYSize);
     if (eErr != CE_None) {
-        fprintf(stderr, "Błąd podczas wczytywania danych rastrowych z %s: %s\n", pszFilename, CPLGetLastErrorMsg());
-        free(pafScanline); // Zwolnij pamięć w przypadku błędu IO
-        GDALClose(hDataset);
+        fprintf(stderr, "Błąd podczas wczytywania danych rastrowych z %s: %s\n",
+                pszFilename, CPLGetLastErrorMsg());
+        cleanup_gdal_resources(hDataset, pafScanline);
         return NULL;
     }
 
+    // Cleanup (zachowujemy buffer, zamykamy dataset)
     GDALClose(hDataset);
+
+    // Oblicz czas wykonania
+    gettimeofday(&end_time, NULL);
+    double elapsed_time = get_time_diff(start_time, end_time);
+
+    printf("[%s] [%s] Zakończono (czas: %.2fs)\n",
+           get_timestamp(), band_name, elapsed_time);
+
     return pafScanline;
+}
+
+int validate_filename(const char* filename)
+{
+    if (filename == NULL)
+    {
+        fprintf(stderr, "Error: Filename is NULL\n");
+        return 0;
+    }
+    return 1;
+}
+
+int validate_gdal_dataset(GDALDatasetH dataset, const char* filename)
+{
+    if (dataset == NULL)
+    {
+        fprintf(stderr, "Nie można otworzyć pliku %s: %s\n", filename, CPLGetLastErrorMsg());
+        return 0;
+    }
+    return 1;
+}
+
+int validate_raster_dimensions(int width, int height, const char* filename)
+{
+    if (width <= 0 || height <= 0)
+    {
+        fprintf(stderr, "Nieprawidłowe wymiary rastra w pliku %s (%dx%d).\n", filename, width, height);
+        return 0;
+    }
+    return 1;
+}
+
+int validate_raster_band(GDALRasterBandH band, const char* filename)
+{
+    if (band == NULL)
+    {
+        fprintf(stderr, "Nie można pobrać pasma z pliku %s: %s\n", filename, CPLGetLastErrorMsg());
+        return 0;
+    }
+    return 1;
+}
+
+int validate_buffer_allocation(float* buffer, size_t num_pixels, const char* filename)
+{
+    if (buffer == NULL)
+    {
+        fprintf(stderr, "Błąd alokacji pamięci dla %zu pikseli danych pasma z pliku %s.\n", num_pixels, filename);
+        return 0;
+    }
+    return 1;
+}
+
+float* allocate_band_buffer(int width, int height, const char* filename)
+{
+    size_t num_pixels = (size_t)width * height;
+
+    float* buffer = malloc(sizeof(float) * num_pixels);
+
+    if (!validate_buffer_allocation(buffer, num_pixels, filename))
+    {
+        return NULL;
+    }
+
+    return buffer;
+}
+
+void cleanup_gdal_resources(GDALDatasetH dataset, float* buffer)
+{
+    if (buffer != NULL)
+    {
+        free(buffer);
+    }
+    if (dataset != NULL)
+    {
+        GDALClose(dataset);
+    }
+}
+
+CPLErr perform_raster_read(GDALRasterBandH band, float* buffer, int width, int height)
+{
+    return GDALRasterIO(band, GF_Read, 0, 0, width, height,
+                        buffer, width, height, GDT_Float32,
+                        0, 0);
+}
+
+void set_output_dimensions(int* output_width, int* output_height, int width, int height)
+{
+    if (output_width != NULL)
+    {
+        *output_width = width;
+    }
+    if (output_height != NULL)
+    {
+        *output_height = height;
+    }
 }
