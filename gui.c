@@ -17,20 +17,10 @@
 
 #define DEFAULT_WINDOW_WIDTH 900
 #define DEFAULT_WINDOW_HEIGHT 750
-
-typedef struct
-{
-    float* ndvi_data;
-    float* ndmi_data;
-    int width;
-    int height;
-    char current_map_type[10];
-} IndexMapData;
-
 typedef struct
 {
     GtkApplication* app;
-    IndexMapData* map_data;
+    ProcessingResult* map_data;
 } MapWindowData;
 
 typedef struct
@@ -55,6 +45,7 @@ static char* path_b08 = NULL;
 static char* path_b11 = NULL;
 static char* path_scl = NULL;
 static gboolean res_10m_selected = TRUE;
+char current_map_type[10] = "NDVI";
 
 static GtkWidget* btn_load_b04_widget = NULL;
 static GtkWidget* btn_load_b08_widget = NULL;
@@ -66,7 +57,7 @@ static GtkWidget* the_config_window = NULL;
 
 // ====== GUI - GŁÓWNE FUNKCJE ======
 static void activate_config_window(GtkApplication* app);
-static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data);
+static GtkWidget* create_map_window(GtkApplication* app, ProcessingResult* map_data);
 static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr);
 
 // ====== GUI - OBSŁUGA ZDARZEŃ ======
@@ -88,9 +79,6 @@ void handle_file_selection(GtkWindow* parent_window, const gchar* dialog_title_s
 
 // ====== WALIDACJA ======
 static int validate_band_paths(BandData bands[], int band_count, GtkWindow* parent_window);
-
-// ====== PRZETWARZANIE DANYCH ======
-static IndexMapData* convert_processing_result_to_map_data(ProcessingResult* processing_result);
 
 // ====== PAMIĘĆ ======
 static void free_index_map_data(gpointer data);
@@ -173,7 +161,7 @@ static void activate_config_window(GtkApplication* app)
     gtk_widget_show_all(config_window_local);
 }
 
-static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data)
+static GtkWidget* create_map_window(GtkApplication* app, ProcessingResult* map_data)
 {
     // Tworzenie okna
     GtkWidget* map_window = gtk_application_window_new(app);
@@ -220,7 +208,7 @@ static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data)
     g_signal_connect(radio_ndvi, "toggled", G_CALLBACK(on_map_type_radio_toggled), drawing_area);
 
     // Ustawienie domyślnego wyboru
-    if (strcmp(map_data->current_map_type, "NDVI") == 0)
+    if (strcmp(current_map_type, "NDVI") == 0)
     {
         gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio_ndvi), TRUE);
     }
@@ -243,9 +231,9 @@ static GtkWidget* create_map_window(GtkApplication* app, IndexMapData* map_data)
 
 static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr)
 {
-    IndexMapData* map_data = g_object_get_data(G_OBJECT(widget), "map_data_ptr");
+    ProcessingResult* map_data = g_object_get_data(G_OBJECT(widget), "map_data_ptr");
 
-    const float* data_to_render = strcmp(map_data->current_map_type, "NDVI") == 0
+    const float* data_to_render = strcmp(current_map_type, "NDVI") == 0
                                       ? map_data->ndvi_data
                                       : map_data->ndmi_data;
     GdkPixbuf* pixbuf = generate_pixbuf_from_index_data(data_to_render,
@@ -353,18 +341,9 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
         return;
     }
 
-    // Konwersja wyniku na format GUI
-    IndexMapData* map_display_data = convert_processing_result_to_map_data(processing_result);
-    if (!map_display_data)
-    {
-        g_printerr("[%s] Błąd podczas konwersji danych dla GUI.\n", get_timestamp());
-        show_error_dialog(parent_gtk_window, "Błąd podczas przygotowywania danych do wyświetlenia.");
-        return;
-    }
-
     // Tworzenie okna mapy
     GtkApplication* app = gtk_window_get_application(GTK_WINDOW(config_window_widget));
-    GtkWidget* map_window = create_map_window(app, map_display_data);
+    GtkWidget* map_window = create_map_window(app, processing_result);
 
     if (map_window)
     {
@@ -376,7 +355,7 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
     {
         g_printerr("[%s] Błąd podczas tworzenia okna mapy.\n", get_timestamp());
         show_error_dialog(parent_gtk_window, "Błąd podczas tworzenia okna mapy.");
-        free_index_map_data(map_display_data);
+        free_index_map_data(processing_result);
     }
 }
 
@@ -394,16 +373,15 @@ static void on_map_type_radio_toggled(GtkToggleButton* togglebutton, gpointer us
     if (gtk_toggle_button_get_active(togglebutton))
     {
         GtkWidget* drawing_area = GTK_WIDGET(user_data);
-        IndexMapData* map_data = g_object_get_data(G_OBJECT(drawing_area), "map_data_ptr");
         const gchar* label = gtk_button_get_label(GTK_BUTTON(togglebutton));
 
         if (g_strcmp0(label, "NDVI") == 0)
         {
-            strcpy(map_data->current_map_type, "NDVI");
+            strcpy(current_map_type, "NDVI");
         }
         else
         {
-            strcpy(map_data->current_map_type, "NDMI");
+            strcpy(current_map_type, "NDMI");
         }
 
         if (GTK_IS_WIDGET(drawing_area) && gtk_widget_get_realized(drawing_area) &&
@@ -485,38 +463,6 @@ static int validate_band_paths(BandData bands[], int band_count, GtkWindow* pare
     return 1;
 }
 
-// ====== IMPLEMENTACJE - PRZETWARZANIE DANYCH ======
-static IndexMapData* convert_processing_result_to_map_data(ProcessingResult* processing_result)
-{
-    if (!processing_result)
-    {
-        return NULL;
-    }
-
-    IndexMapData* map_data = g_new(IndexMapData, 1);
-    if (!map_data)
-    {
-        g_printerr("[%s] Błąd alokacji pamięci dla IndexMapData.\n", get_timestamp());
-        return NULL;
-    }
-
-    // Przeniesienie danych z ProcessingResult do IndexMapData
-    map_data->ndvi_data = processing_result->ndvi_data;
-    map_data->ndmi_data = processing_result->ndmi_data;
-    map_data->width = processing_result->width;
-    map_data->height = processing_result->height;
-    strcpy(map_data->current_map_type, "NDVI");
-
-    // Wyzerowanie wskaźników w ProcessingResult, żeby nie zostały zwolnione
-    processing_result->ndvi_data = NULL;
-    processing_result->ndmi_data = NULL;
-
-    // Zwolnienie struktury ProcessingResult (ale nie danych, które przejęliśmy)
-    free(processing_result);
-
-    return map_data;
-}
-
 // ====== IMPLEMENTACJE - PAMIĘĆ ======
 
 static void free_index_map_data(gpointer data)
@@ -528,7 +474,7 @@ static void free_index_map_data(gpointer data)
         return;
     }
 
-    IndexMapData* map_data = data;
+    ProcessingResult* map_data = data;
 
     if (map_data->ndvi_data)
     {
