@@ -61,6 +61,7 @@ GdkPixbuf* generate_pixbuf_from_index_data(const float* index_data, int width, i
     int rowstride = gdk_pixbuf_get_rowstride(pixbuf);
     int n_channels = gdk_pixbuf_get_n_channels(pixbuf);
 
+    #pragma omp parallel for shared(index_data, pixels, rowstride, n_channels)
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
             size_t pixel_idx_float = pixel_index(x, y, width);
