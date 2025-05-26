@@ -21,6 +21,8 @@ typedef struct
 {
     GtkApplication* app;
     ProcessingResult* map_data;
+    GdkPixbuf *ndvi_pixbuf;
+    GdkPixbuf *ndmi_pixbuf;
 } MapWindowData;
 
 typedef struct
@@ -58,7 +60,7 @@ static GtkWidget* the_config_window = NULL;
 // ====== GUI - GŁÓWNE FUNKCJE ======
 static void activate_config_window(GtkApplication* app);
 static GtkWidget* create_map_window(GtkApplication* app, ProcessingResult* map_data);
-static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr);
+static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr, gpointer user_data);
 
 // ====== GUI - OBSŁUGA ZDARZEŃ ======
 static void on_config_window_destroy(GtkWidget* widget);
@@ -170,9 +172,25 @@ static GtkWidget* create_map_window(GtkApplication* app, ProcessingResult* map_d
     gtk_container_set_border_width(GTK_CONTAINER(map_window), 10);
 
     // Enkapsulacja danych okna z automatycznym cleanup
-    MapWindowData* window_data = g_new(MapWindowData, 1);
+    MapWindowData* window_data = g_new0(MapWindowData, 1);
     window_data->app = app;
     window_data->map_data = map_data;
+
+    if (map_data && map_data->ndvi_data) {
+        window_data->ndvi_pixbuf = generate_pixbuf_from_index_data(map_data->ndvi_data, map_data->width, map_data->height);
+    }
+    if (map_data && map_data->ndmi_data) {
+        window_data->ndmi_pixbuf = generate_pixbuf_from_index_data(map_data->ndmi_data, map_data->width, map_data->height);
+    }
+
+    if (!window_data->ndvi_pixbuf || !window_data->ndmi_pixbuf) {
+        g_printerr("[%s] Nie udało się wygenerować jednego lub obu pixbufów dla map.\n", get_timestamp());
+        if(window_data->ndvi_pixbuf) g_object_unref(window_data->ndvi_pixbuf);
+        if(window_data->ndmi_pixbuf) g_object_unref(window_data->ndmi_pixbuf);
+        g_free(window_data);
+        gtk_widget_destroy(map_window);
+        return NULL;
+    }
 
     g_object_set_data_full(G_OBJECT(map_window), "window_data",
                            window_data, map_window_data_destroy);
@@ -195,8 +213,7 @@ static GtkWidget* create_map_window(GtkApplication* app, ProcessingResult* map_d
     gtk_widget_set_size_request(drawing_area, map_data->width, map_data->height);
 
     // Przypisanie danych do drawing_area (dla funkcji rysowania)
-    g_object_set_data(G_OBJECT(drawing_area), "map_data_ptr", map_data);
-    g_signal_connect(drawing_area, "draw", G_CALLBACK(on_draw_map_area), map_data);
+    g_signal_connect(drawing_area, "draw", G_CALLBACK(on_draw_map_area), window_data);
 
     // Radio buttons
     GtkWidget* radio_ndmi = gtk_radio_button_new_with_label(NULL, "NDMI");
@@ -229,26 +246,27 @@ static GtkWidget* create_map_window(GtkApplication* app, ProcessingResult* map_d
     return map_window;
 }
 
-static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr)
+static gboolean on_draw_map_area(GtkWidget* widget, cairo_t* cr, gpointer user_data)
 {
-    ProcessingResult* map_data = g_object_get_data(G_OBJECT(widget), "map_data_ptr");
+    MapWindowData* win_data = (MapWindowData*)user_data;
 
-    const float* data_to_render = strcmp(current_map_type, "NDVI") == 0
-                                      ? map_data->ndvi_data
-                                      : map_data->ndmi_data;
-    GdkPixbuf* pixbuf = generate_pixbuf_from_index_data(data_to_render,
-                                                        map_data->width,
-                                                        map_data->height);
-    if (pixbuf)
-    {
-        gdk_cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
+    if (!win_data || !win_data->map_data) {
+        g_printerr("[%s] Błąd krytyczny w on_draw_map_area: brak danych okna lub mapy.\n", get_timestamp());
+        cairo_set_source_rgb(cr, 0.5, 0.0, 0.5);
         cairo_paint(cr);
-        g_object_unref(pixbuf);
+        return TRUE;
     }
-    else
+
+    GdkPixbuf* pixbuf_to_draw = NULL;
+    if (strcmp(current_map_type, "NDVI") == 0) {
+        pixbuf_to_draw = win_data->ndvi_pixbuf;
+    } else {
+        pixbuf_to_draw = win_data->ndmi_pixbuf;
+    }
+
+    if (pixbuf_to_draw)
     {
-        g_printerr("[%s] Błąd tworzenia mapy --- Nie udało się wygenerować pixbuf.\n", get_timestamp());
-        cairo_set_source_rgb(cr, 1, 0, 0);
+        gdk_cairo_set_source_pixbuf(cr, pixbuf_to_draw, 0, 0);
         cairo_paint(cr);
     }
     return TRUE;
@@ -501,6 +519,17 @@ static void map_window_data_destroy(gpointer data)
     {
         g_print("[%s] window_data jest NULL, pomijam cleanup.\n", get_timestamp());
         return;
+    }
+
+    if (window_data->ndvi_pixbuf) {
+        g_print("[%s] Zwalnianie ndvi_pixbuf: %p\n", get_timestamp(), (void*)window_data->ndvi_pixbuf);
+        g_object_unref(window_data->ndvi_pixbuf);
+        window_data->ndvi_pixbuf = NULL;
+    }
+    if (window_data->ndmi_pixbuf) {
+        g_print("[%s] Zwalnianie ndmi_pixbuf: %p\n", get_timestamp(), (void*)window_data->ndmi_pixbuf);
+        g_object_unref(window_data->ndmi_pixbuf);
+        window_data->ndmi_pixbuf = NULL;
     }
 
     if (window_data->map_data)
