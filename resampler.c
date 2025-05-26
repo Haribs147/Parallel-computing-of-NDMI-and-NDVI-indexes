@@ -179,6 +179,7 @@ void perform_nearest_neighbor_resample(const float* input_band, float* output_ba
     float x_ratio = (float)input_width / output_width;
     float y_ratio = (float)input_height / output_height;
 
+    #pragma omp parallel for shared(input_band, output_band, x_ratio, y_ratio) collapse(2)
     for (int y_out = 0; y_out < output_height; y_out++)
     {
         for (int x_out = 0; x_out < output_width; x_out++)
@@ -229,6 +230,7 @@ void perform_bilinear_resample(const float* input_band, float* output_band,
     float x_ratio = (float)input_width / output_width;
     float y_ratio = (float)input_height / output_height;
 
+    #pragma omp parallel for shared(input_band, output_band, x_ratio, y_ratio) collapse(2)
     for (int y_out = 0; y_out < output_height; y_out++)
     {
         for (int x_out = 0; x_out < output_width; x_out++)
@@ -304,6 +306,7 @@ void perform_average_resample(const float* input_band, float* output_band,
     float x_scale_factor = (float)input_width / output_width;
     float y_scale_factor = (float)input_height / output_height;
 
+    #pragma omp parallel for shared(input_band, output_band, x_scale_factor, y_scale_factor) collapse(2)
     for (int y_out = 0; y_out < output_height; y_out++)
     {
         for (int x_out = 0; x_out < output_width; x_out++)
