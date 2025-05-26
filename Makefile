@@ -8,15 +8,12 @@ GTK_LIBS = $(shell pkg-config --libs gtk+-3.0)
 # Opcje kompilatora i linkera dla GDAL (uzyskane z gdal-config)
 GDAL_CFLAGS = $(shell gdal-config --cflags)
 GDAL_LIBS = $(shell gdal-config --libs)
-# Usunięto OMP_FLAGS
-# Flagi OpenMP (opcjonalnie, jeśli chcesz użyć #pragma omp)
-# OMP_FLAGS = -fopenmp
-# Wszystkie flagi kompilatora
-# Usunięto OMP_FLAGS z CFLAGS
-CFLAGS = $(GTK_CFLAGS) $(GDAL_CFLAGS) -Wall -g -std=c11
-# Wszystkie biblioteki do linkowania
-# Usunięto OMP_FLAGS z LIBS
-LIBS = $(GTK_LIBS) $(GDAL_LIBS) -lm
+# Flagi OpenMP
+OMP_FLAGS = -fopenmp
+# Wszystkie flagi kompilatora (przywrócono OMP_FLAGS)
+CFLAGS = $(GTK_CFLAGS) $(GDAL_CFLAGS) $(OMP_FLAGS) -Wall -g -std=c11
+# Wszystkie biblioteki do linkowania (przywrócono OMP_FLAGS)
+LIBS = $(GTK_LIBS) $(GDAL_LIBS) $(OMP_FLAGS) -lm
 # Pliki źródłowe
 SRCS = main.c gui.c gui_utils.c data_loader.c resampler.c utils.c index_calculator.c visualization.c processing_pipeline.c
 # Pliki obiektowe (automatycznie generowane z .c na .o)
