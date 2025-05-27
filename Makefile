@@ -16,7 +16,7 @@ CFLAGS = $(GTK_CFLAGS) $(GDAL_CFLAGS) $(OMP_FLAGS) -Wall -g -std=c11
 # Wszystkie biblioteki do linkowania (przywrócono OMP_FLAGS)
 LIBS = $(GTK_LIBS) $(GDAL_LIBS) $(OMP_FLAGS) -lm
 # Pliki źródłowe
-SRCS = main.c gui.c gui_utils.c data_loader.c resampler.c utils.c index_calculator.c visualization.c processing_pipeline.c
+SRCS = main.c gui.c gui_utils.c data_loader.c resampler.c utils.c index_calculator.c visualization.c processing_pipeline.c data_saver.c
 # Pliki obiektowe (automatycznie generowane z .c na .o)
 OBJS = $(SRCS:.c=.o)
 # Pliki obiektowe dla valgrind_test (bez gui.o i gui_utils.o, main.o)
@@ -55,6 +55,9 @@ visualization.o: visualization.c visualization.h index_calculator.h
 	@$(CC) $(CFLAGS) -c visualization.c -o visualization.o
 processing_pipeline.o: processing_pipeline.c processing_pipeline.h data_loader.h resampler.h index_calculator.h utils.h data_types.h
 	@$(CC) $(CFLAGS) -c processing_pipeline.c -o processing_pipeline.o
+data_saver.o: data_saver.c data_saver.h
+	@$(CC) $(CFLAGS) -c data_saver.c -o data_saver.o
+
 # Reguła czyszczenia
 clean:
 	@rm -f $(TARGET) $(VALGRIND_TARGET) $(OBJS) test/valgrind_test.o test/valgrind_report.txt

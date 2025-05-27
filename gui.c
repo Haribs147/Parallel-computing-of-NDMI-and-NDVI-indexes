@@ -8,12 +8,12 @@
 
 #include "gui.h"
 #include "gui_utils.h"
-#include "data_loader.h"
 #include "resampler.h"
 #include "utils.h"
 #include "index_calculator.h"
 #include "processing_pipeline.h"
 #include "visualization.h"
+#include "data_saver.h"
 
 #define DEFAULT_WINDOW_WIDTH 900
 #define DEFAULT_WINDOW_HEIGHT 750
@@ -49,10 +49,18 @@ static char* path_scl = NULL;
 static gboolean res_10m_selected = TRUE;
 char current_map_type[10] = "NDVI";
 
+static char* save_filename_ndvi = NULL;
+static char* save_filename_ndmi = NULL;
+static gboolean save_results_to_file = FALSE;
+
 static GtkWidget* btn_load_b04_widget = NULL;
 static GtkWidget* btn_load_b08_widget = NULL;
 static GtkWidget* btn_load_b11_widget = NULL;
 static GtkWidget* btn_load_scl_widget = NULL;
+
+static GtkWidget* entry_ndvi_filename_widget = NULL;
+static GtkWidget* entry_ndmi_filename_widget = NULL;
+static GtkWidget* check_save_results_widget = NULL;
 
 // Statyczny wskaźnik do okna konfiguracji
 static GtkWidget* the_config_window = NULL;
@@ -71,6 +79,7 @@ static void on_load_scl_clicked(GtkWidget* widget, gpointer data);
 static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data);
 static void on_config_radio_resolution_toggled(GtkToggleButton* togglebutton);
 static void on_map_type_radio_toggled(GtkToggleButton* togglebutton, gpointer user_data);
+static void on_save_results_toggled(GtkToggleButton *toggle_button, gpointer user_data);
 
 // ====== POMOCNICZE ======
 const BandConfig* get_band_config(const gchar* dialog_title_suffix);
@@ -110,6 +119,9 @@ static void activate_config_window(GtkApplication* app)
     GtkWidget* load_buttons_hbox;
     GtkWidget *radio_10m, *radio_20m;
     GtkWidget* btn_rozpocznij;
+    GtkWidget* save_options_grid;
+    GtkWidget* label_ndvi_filename;
+    GtkWidget* label_ndmi_filename; 
 
     config_window_local = gtk_application_window_new(app);
     gtk_window_set_title(GTK_WINDOW(config_window_local), "Konfiguracja Analizy");
@@ -154,6 +166,42 @@ static void activate_config_window(GtkApplication* app)
     btn_load_scl_widget = create_button_with_ellipsis("Wczytaj pasmo SCL");
     g_signal_connect(btn_load_scl_widget, "clicked", G_CALLBACK(on_load_scl_clicked), config_window_local);
     gtk_box_pack_start(GTK_BOX(load_buttons_hbox), btn_load_scl_widget, TRUE, TRUE, 0);
+
+    // Checkbox do włączenia zapisu
+    check_save_results_widget = gtk_check_button_new_with_label("Zapisz wyniki do plików PNG");
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check_save_results_widget), save_results_to_file);
+    g_signal_connect(check_save_results_widget, "toggled", G_CALLBACK(on_save_results_toggled), NULL);
+    gtk_box_pack_start(GTK_BOX(main_vbox), check_save_results_widget, FALSE, FALSE, 5);
+
+    // Użyjemy GtkGrid dla lepszego wyrównania etykiet i pól tekstowych
+    save_options_grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(save_options_grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(save_options_grid), 5);
+    gtk_box_pack_start(GTK_BOX(main_vbox), save_options_grid, FALSE, FALSE, 0);
+
+    // Pole na nazwę pliku NDVI
+    label_ndvi_filename = gtk_label_new("Nazwa pliku NDVI:");
+    gtk_widget_set_halign(label_ndvi_filename, GTK_ALIGN_START);
+    gtk_grid_attach(GTK_GRID(save_options_grid), label_ndvi_filename, 0, 0, 1, 1);
+
+    entry_ndvi_filename_widget = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(entry_ndvi_filename_widget), "ndvi_output.png");
+    gtk_widget_set_hexpand(entry_ndvi_filename_widget, TRUE);
+    gtk_grid_attach(GTK_GRID(save_options_grid), entry_ndvi_filename_widget, 1, 0, 1, 1);
+
+    // Pole na nazwę pliku NDMI
+    label_ndmi_filename = gtk_label_new("Nazwa pliku NDMI:");
+    gtk_widget_set_halign(label_ndmi_filename, GTK_ALIGN_START);
+    gtk_grid_attach(GTK_GRID(save_options_grid), label_ndmi_filename, 0, 1, 1, 1);
+
+    entry_ndmi_filename_widget = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(entry_ndmi_filename_widget), "ndmi_output.png");
+    gtk_widget_set_hexpand(entry_ndmi_filename_widget, TRUE);
+    gtk_grid_attach(GTK_GRID(save_options_grid), entry_ndmi_filename_widget, 1, 1, 1, 1);
+
+    // Ustawienie początkowej czułości pól tekstowych
+    gtk_widget_set_sensitive(entry_ndvi_filename_widget, save_results_to_file);
+    gtk_widget_set_sensitive(entry_ndmi_filename_widget, save_results_to_file);
 
     btn_rozpocznij = gtk_button_new_with_label("Rozpocznij");
     g_signal_connect(btn_rozpocznij, "clicked", G_CALLBACK(on_rozpocznij_clicked), config_window_local);
@@ -329,6 +377,28 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
     GtkWidget* config_window_widget = GTK_WIDGET(user_data);
     GtkWindow* parent_gtk_window = GTK_WINDOW(user_data);
 
+    if (save_results_to_file) {
+        const char* ndvi_filename_text = gtk_entry_get_text(GTK_ENTRY(entry_ndvi_filename_widget));
+        const char* ndmi_filename_text = gtk_entry_get_text(GTK_ENTRY(entry_ndmi_filename_widget));
+
+        if (strlen(ndvi_filename_text) == 0 || strlen(ndmi_filename_text) == 0) {
+            show_error_dialog(parent_gtk_window, "Jeśli zaznaczono opcję zapisu, nazwy plików NDVI i NDMI nie mogą być puste.");
+            return;
+        }
+        // Zwolnij stare nazwy, jeśli istnieją
+        if (save_filename_ndvi) g_free(save_filename_ndvi);
+        save_filename_ndvi = g_strdup(ndvi_filename_text);
+
+        if (save_filename_ndmi) g_free(save_filename_ndmi);
+        save_filename_ndmi = g_strdup(ndmi_filename_text);
+    } else {
+        // Jeśli zapis nie jest włączony, upewnij się, że wskaźniki są NULL
+        if (save_filename_ndvi) g_free(save_filename_ndvi);
+        save_filename_ndvi = NULL;
+        if (save_filename_ndmi) g_free(save_filename_ndmi);
+        save_filename_ndmi = NULL;
+    }
+
     // Przygotowanie danych pasm
     int widths[4], heights[4];
     float* raw_data[4] = {NULL};
@@ -365,6 +435,15 @@ static void on_rozpocznij_clicked(GtkWidget* widget, gpointer user_data)
 
     if (map_window)
     {
+        if (save_results_to_file && save_filename_ndvi && save_filename_ndmi) {
+            MapWindowData* window_data = g_object_get_data(G_OBJECT(map_window), "window_data");
+            if (window_data) {
+                save_pixbuf_to_png(window_data->ndvi_pixbuf, save_filename_ndvi);
+                save_pixbuf_to_png(window_data->ndmi_pixbuf, save_filename_ndmi);
+            } else {
+                g_printerr("[%s] Nie można pobrać window_data do zapisu pixbufów.\n", get_timestamp());
+            }
+        }
         g_print("[%s] Pomyślnie utworzono okno mapy.\n", get_timestamp());
         gtk_widget_show_all(map_window);
         gtk_widget_destroy(config_window_widget);
@@ -408,6 +487,14 @@ static void on_map_type_radio_toggled(GtkToggleButton* togglebutton, gpointer us
             gtk_widget_queue_draw(drawing_area);
         }
     }
+}
+
+static void on_save_results_toggled(GtkToggleButton *toggle_button, gpointer user_data) {
+    save_results_to_file = gtk_toggle_button_get_active(toggle_button);
+
+    // Włącz lub wyłącz pola tekstowe nazw plików w zależności od stanu checkboxa
+    gtk_widget_set_sensitive(entry_ndvi_filename_widget, save_results_to_file);
+    gtk_widget_set_sensitive(entry_ndmi_filename_widget, save_results_to_file);
 }
 
 // ====== IMPLEMENTACJE - POMOCNICZE ======
@@ -548,4 +635,13 @@ static void map_window_data_destroy(gpointer data)
     path_b11 = NULL;
     path_scl = NULL;
     res_10m_selected = TRUE;
+
+    if (save_filename_ndvi) {
+        g_free(save_filename_ndvi);
+        save_filename_ndvi = NULL;
+    }
+    if (save_filename_ndmi) {
+        g_free(save_filename_ndmi);
+        save_filename_ndmi = NULL;
+    }
 }
