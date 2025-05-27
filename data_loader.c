@@ -5,6 +5,9 @@
 #include <sys/time.h>
 #include <gdal.h>
 #include "data_loader.h"
+
+#include <glib.h>
+
 #include "utils.h"
 
 // ====== WALIDACJA ======
@@ -22,31 +25,57 @@ void set_output_dimensions(int* output_width, int* output_height, int width, int
 
 int load_all_bands_data(BandData bands[4])
 {
+    int error_flag = 0;
+
+    // Równoległe wczytywanie pasm
+    #pragma omp parallel for shared(bands, error_flag)
     for (int i = 0; i < 4; i++)
     {
-        *(bands[i].raw_data) = LoadBandData(*(bands[i].path), bands[i].width, bands[i].height);
-        if (!*(bands[i].raw_data))
-        {
-            fprintf(stderr, "[%s] Błąd wczytywania pasma %s z pliku: %s\n",
-                    get_timestamp(), bands[i].band_name, *(bands[i].path));
-
-            // Zwolnienie już wczytanych danych
-            for (int j = 0; j < i; j++)
-            {
-                if (*(bands[j].raw_data))
-                {
-                    free(*(bands[j].raw_data));
-                    *(bands[j].raw_data) = NULL;
-                }
-            }
-            return -1;
+        // Wyjdź z pętli, jeżeli jedno z pasm napotkało błąd
+        if (error_flag) {
+            continue;
         }
 
-        // Ustawienie processed_data na raw_data (początkowo te same dane)
-        *(bands[i].processed_data) = *(bands[i].raw_data);
+        *(bands[i].raw_data) = LoadBandData(*(bands[i].path), bands[i].width, bands[i].height);
 
-        printf("[%s] Pomyślnie wczytano pasmo %s (%dx%d pikseli).\n",
-               get_timestamp(), bands[i].band_name, *bands[i].width, *bands[i].height);
+        if (!*(bands[i].raw_data))
+        {
+        #pragma omp critical
+            {
+                if (!error_flag)
+                {
+                    g_printerr("[%s] Błąd wczytywania pasma %s z pliku: %s\n",
+                            get_timestamp(), bands[i].band_name, *(bands[i].path));
+                    error_flag = 1;
+                }
+            }
+        }
+        else
+        {
+            // Ustawienie processed_data na raw_data (początkowo te same dane)
+            *(bands[i].processed_data) = *(bands[i].raw_data);
+
+            #pragma omp critical
+            {
+                g_print("[%s] Pomyślnie wczytano pasmo %s (%dx%d pikseli).\n",
+                       get_timestamp(), bands[i].band_name, *bands[i].width, *bands[i].height);
+            }
+        }
+    }
+
+    // Jeśli wystąpił błąd, zwolnij już wczytane dane
+    if (error_flag)
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            if (*(bands[i].raw_data))
+            {
+                free(*(bands[i].raw_data));
+                *(bands[i].raw_data) = NULL;
+                *(bands[i].processed_data) = NULL;
+            }
+        }
+        return -1;
     }
 
     return 0;

@@ -113,6 +113,7 @@ float* calculate_index_base(const float* band_a, const float* band_b,
 
     size_t num_pixels = (size_t)width * height;
 
+    #pragma omp parallel for shared(band_a, band_b, scl_band, result_data)
     for (size_t i = 0; i < num_pixels; i++) {
         if (is_scl_pixel_masked(scl_band[i])) {
             result_data[i] = INDEX_NO_DATA_VALUE;
