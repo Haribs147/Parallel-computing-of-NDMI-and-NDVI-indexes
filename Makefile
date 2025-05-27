@@ -2,6 +2,7 @@
 CC = gcc
 # Nazwa pliku wykonywalnego
 TARGET = a.out
+VALGRIND_TARGET = valgrind_test
 # Opcje kompilatora i linkera dla GTK+ 3.0 (uzyskane z pkg-config)
 GTK_CFLAGS = $(shell pkg-config --cflags gtk+-3.0)
 GTK_LIBS = $(shell pkg-config --libs gtk+-3.0)
@@ -18,11 +19,23 @@ LIBS = $(GTK_LIBS) $(GDAL_LIBS) $(OMP_FLAGS) -lm
 SRCS = main.c gui.c gui_utils.c data_loader.c resampler.c utils.c index_calculator.c visualization.c processing_pipeline.c
 # Pliki obiektowe (automatycznie generowane z .c na .o)
 OBJS = $(SRCS:.c=.o)
+# Pliki obiektowe dla valgrind_test (bez gui.o i gui_utils.o, main.o)
+VALGRIND_OBJS = data_loader.o resampler.o utils.o index_calculator.o visualization.o processing_pipeline.o
+
 # Domyślna reguła: buduje program
 all: $(TARGET)
 # Reguła linkowania: tworzy plik wykonywalny z plików obiektowych
 $(TARGET): $(OBJS)
 	@$(CC) $(OBJS) -o $(TARGET) $(LIBS)
+
+# Reguła dla valgrind_test: kompiluje i linkuje test
+$(VALGRIND_TARGET): $(VALGRIND_OBJS) valgrind_test.o
+	@$(CC) $(VALGRIND_OBJS) test/valgrind_test.o -o $(VALGRIND_TARGET) $(LIBS)
+
+# Kompilacja valgrind_test.c (używamy tych samych flag co główny program)
+valgrind_test.o: test/valgrind_test.c data_types.h data_loader.h resampler.h utils.h index_calculator.h visualization.h processing_pipeline.h
+	@$(CC) $(CFLAGS) -c test/valgrind_test.c -o test/valgrind_test.o
+
 # Reguły kompilacji
 main.o: main.c gui.h
 	@$(CC) $(CFLAGS) -c main.c -o main.o
@@ -44,5 +57,16 @@ processing_pipeline.o: processing_pipeline.c processing_pipeline.h data_loader.h
 	@$(CC) $(CFLAGS) -c processing_pipeline.c -o processing_pipeline.o
 # Reguła czyszczenia
 clean:
-	@rm -f $(TARGET) $(OBJS)
-.PHONY: all clean
+	@rm -f $(TARGET) $(VALGRIND_TARGET) $(OBJS) test/valgrind_test.o test/valgrind_report.txt
+
+# Reguła pomocnicza do uruchomienia valgrind
+test-valgrind: $(VALGRIND_TARGET)
+	@echo "Uruchamianie testu memory leak z małymi plikami..."
+	@echo "Raport zostanie zapisany w test/valgrind_report.txt"
+	@valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --log-file=test/valgrind_report.txt ./$(VALGRIND_TARGET) test/small_B04.jp2 test/small_B08.jp2 test/small_B11.jp2 test/small_SCL.jp2
+	@echo "Test zakończony. Sprawdź test/valgrind_report.txt"
+
+# Skrócona wersja - tylko buduje i uruchamia valgrind
+valgrind: test-valgrind
+
+.PHONY: all clean test-valgrind valgrind
