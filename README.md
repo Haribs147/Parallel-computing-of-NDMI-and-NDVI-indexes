@@ -1,1 +1,0 @@
-# Parallel-computing-of-NDMI-and-NDVI-indexes
