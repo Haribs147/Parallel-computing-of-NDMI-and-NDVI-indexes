@@ -1,6 +1,4 @@
 # Specyfikacja Projektowa: System Analizy Indeksów Roślinności Sentinel-2
-Mikołaj Pątkowski 325502
-Michał Jagodziński 325473
 
 ## Wprowadzenie
 
